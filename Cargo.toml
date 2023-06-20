@@ -26,10 +26,9 @@ lto = "fat"
 codegen-units = 1
 
 [dependencies]
-wasmparser = { version = "0.100.1", package = "wasmparser-nostd", default-features = false }
+wasmparser = { version = "0.107.0", default-features = false }
 wasmprinter = { version = "0.2.59" }
 wasm-encoder = { version = "0.29.0" }
-anyhow = { version = "1.0.71" }
 
 [dev-dependencies]
 binaryen = "0.12"
