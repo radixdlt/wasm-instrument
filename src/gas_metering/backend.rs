@@ -25,7 +25,7 @@ pub enum GasMeter {
 use super::Rules;
 /// Under the hood part of the gas metering mechanics.
 pub trait Backend {
-	/// Provides the gas metering implementation details.  
+	/// Provides the gas metering implementation details.
 	fn gas_meter<R: Rules>(self, module: &elements::Module, rules: &R) -> GasMeter;
 }
 

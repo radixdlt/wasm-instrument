@@ -70,6 +70,32 @@ pub trait Translator {
 		ty(self.as_obj(), t)
 	}
 
+    fn translate_refty(&mut self, t: &wasmparser::RefType) -> Result<RefType, &'static str> {
+        refty(self.as_obj(), t)
+    }
+
+    fn translate_heapty(&mut self, t: &wasmparser::HeapType) -> Result<HeapType, &'static str> {
+        heapty(self.as_obj(), t)
+    }
+
+pub enum ValType {
+    /// The value type is i32.
+    I32,
+    /// The value type is i64.
+    I64,
+    /// The value type is f32.
+    F32,
+    /// The value type is f64.
+    F64,
+    /// The value type is v128.
+    V128,
+    /// The value type is a function reference.
+    FuncRef,
+    /// The value type is an extern reference.
+    ExternRef,
+}
+
+
 	fn translate_global(&self, g: Global, s: &mut GlobalSection) -> Result<(), &'static str> {
 		global(self.as_obj(), g, s)
 	}
@@ -147,8 +173,14 @@ pub fn type_def(t: &dyn Translator, ty: Type, s: &mut TypeSection) -> Result<(),
 	match ty {
 		Type::Func(f) => {
 			s.function(
-				f.params().iter().map(|ty| t.translate_ty(ty)).collect::<Result<Vec<_>>>()?,
-				f.results().iter().map(|ty| t.translate_ty(ty)).collect::<Result<Vec<_>>>()?,
+				f.params()
+					.iter()
+					.map(|ty| t.translate_ty(ty))
+					.collect::<Result<Vec<_>, &'static str>>()?,
+				f.results()
+					.iter()
+					.map(|ty| t.translate_ty(ty))
+					.collect::<Result<Vec<_>, &'static str>>()?,
 			);
 			Ok(())
 		},
@@ -317,19 +349,18 @@ pub fn element(
 				.into_iter()
 				.map(|item| match item {
 					Ok(expr) => {
-						let const_expr =
-							t.translate_const_expr(&expr, &element.ty, &element.kind)?;
-						Ok(const_expr)
+						t.translate_const_expr(&expr, &element.ty, ConstExprKind::ElementFunction)
 					},
 					Err(err) => Err(stringify!(err)),
 				})
-				.collect::<Result<ConstExpr>, &'static str>()?;
+				.collect::<Result<Vec<ConstExpr>, &'static str>>()?;
 
 			Elements::Expressions(&expressions)
 		},
 	};
 
-	section.segment(ElementSegment { mode, element_type, elements });
+	// TODO: Make sure we can use FUNCREF here
+	section.segment(ElementSegment { mode, element_type: RefType::FUNCREF, elements });
 	Ok(())
 }
 
@@ -359,7 +390,11 @@ pub fn op(t: &dyn Translator, op: &Operator<'_>) -> Result<Instruction<'static>,
 		O::BrTable { targets } => I::BrTable(
 			targets
 				.targets()
-				.collect::<Result<Vec<_>, wasmparser::BinaryReaderError>>()?
+				.map(|item| match item {
+					Ok(val) => Ok(val),
+					Err(err) => Err(stringify!(err)),
+				})
+				.collect::<Result<Vec<_>, &'static str>>()?
 				.into(),
 			targets.default(),
 		),
@@ -386,16 +421,16 @@ pub fn op(t: &dyn Translator, op: &Operator<'_>) -> Result<Instruction<'static>,
 		O::I64Load { memarg } => I::I64Load(t.translate_memarg(memarg)?),
 		O::F32Load { memarg } => I::F32Load(t.translate_memarg(memarg)?),
 		O::F64Load { memarg } => I::F64Load(t.translate_memarg(memarg)?),
-		O::I32Load8S { memarg } => I::I32Load8_S(t.translate_memarg(memarg)?),
-		O::I32Load8U { memarg } => I::I32Load8_U(t.translate_memarg(memarg)?),
-		O::I32Load16S { memarg } => I::I32Load16_S(t.translate_memarg(memarg)?),
-		O::I32Load16U { memarg } => I::I32Load16_U(t.translate_memarg(memarg)?),
-		O::I64Load8S { memarg } => I::I64Load8_S(t.translate_memarg(memarg)?),
-		O::I64Load8U { memarg } => I::I64Load8_U(t.translate_memarg(memarg)?),
-		O::I64Load16S { memarg } => I::I64Load16_S(t.translate_memarg(memarg)?),
-		O::I64Load16U { memarg } => I::I64Load16_U(t.translate_memarg(memarg)?),
-		O::I64Load32S { memarg } => I::I64Load32_S(t.translate_memarg(memarg)?),
-		O::I64Load32U { memarg } => I::I64Load32_U(t.translate_memarg(memarg)?),
+		O::I32Load8S { memarg } => I::I32Load8S(t.translate_memarg(memarg)?),
+		O::I32Load8U { memarg } => I::I32Load8U(t.translate_memarg(memarg)?),
+		O::I32Load16S { memarg } => I::I32Load16S(t.translate_memarg(memarg)?),
+		O::I32Load16U { memarg } => I::I32Load16U(t.translate_memarg(memarg)?),
+		O::I64Load8S { memarg } => I::I64Load8S(t.translate_memarg(memarg)?),
+		O::I64Load8U { memarg } => I::I64Load8U(t.translate_memarg(memarg)?),
+		O::I64Load16S { memarg } => I::I64Load16S(t.translate_memarg(memarg)?),
+		O::I64Load16U { memarg } => I::I64Load16U(t.translate_memarg(memarg)?),
+		O::I64Load32S { memarg } => I::I64Load32S(t.translate_memarg(memarg)?),
+		O::I64Load32U { memarg } => I::I64Load32U(t.translate_memarg(memarg)?),
 		O::I32Store { memarg } => I::I32Store(t.translate_memarg(memarg)?),
 		O::I64Store { memarg } => I::I64Store(t.translate_memarg(memarg)?),
 		O::F32Store { memarg } => I::F32Store(t.translate_memarg(memarg)?),
@@ -714,7 +749,7 @@ pub fn op(t: &dyn Translator, op: &Operator<'_>) -> Result<Instruction<'static>,
 		O::I8x16MinU => I::I8x16MinU,
 		O::I8x16MaxS => I::I8x16MaxS,
 		O::I8x16MaxU => I::I8x16MaxU,
-		O::I8x16RoundingAverageU => I::I8x16RoundingAverageU,
+		//		O::I8x16RoundingAverageU => I::I8x16RoundingAverageU,
 		O::I16x8ExtAddPairwiseI8x16S => I::I16x8ExtAddPairwiseI8x16S,
 		O::I16x8ExtAddPairwiseI8x16U => I::I16x8ExtAddPairwiseI8x16U,
 		O::I16x8Abs => I::I16x8Abs,
@@ -742,7 +777,7 @@ pub fn op(t: &dyn Translator, op: &Operator<'_>) -> Result<Instruction<'static>,
 		O::I16x8MinU => I::I16x8MinU,
 		O::I16x8MaxS => I::I16x8MaxS,
 		O::I16x8MaxU => I::I16x8MaxU,
-		O::I16x8RoundingAverageU => I::I16x8RoundingAverageU,
+		//		O::I16x8RoundingAverageU => I::I16x8RoundingAverageU,
 		O::I16x8ExtMulLowI8x16S => I::I16x8ExtMulLowI8x16S,
 		O::I16x8ExtMulHighI8x16S => I::I16x8ExtMulHighI8x16S,
 		O::I16x8ExtMulLowI8x16U => I::I16x8ExtMulLowI8x16U,
@@ -831,14 +866,14 @@ pub fn op(t: &dyn Translator, op: &Operator<'_>) -> Result<Instruction<'static>,
 		O::F32x4DemoteF64x2Zero => I::F32x4DemoteF64x2Zero,
 		O::F64x2PromoteLowF32x4 => I::F64x2PromoteLowF32x4,
 		O::I8x16RelaxedSwizzle => I::I8x16RelaxedSwizzle,
-		O::I32x4RelaxedTruncSatF32x4S => I::I32x4RelaxedTruncSatF32x4S,
-		O::I32x4RelaxedTruncSatF32x4U => I::I32x4RelaxedTruncSatF32x4U,
-		O::I32x4RelaxedTruncSatF64x2SZero => I::I32x4RelaxedTruncSatF64x2SZero,
-		O::I32x4RelaxedTruncSatF64x2UZero => I::I32x4RelaxedTruncSatF64x2UZero,
-		O::F32x4RelaxedFma => I::F32x4RelaxedFma,
-		O::F32x4RelaxedFnma => I::F32x4RelaxedFnma,
-		O::F64x2RelaxedFma => I::F64x2RelaxedFma,
-		O::F64x2RelaxedFnma => I::F64x2RelaxedFnma,
+		O::I32x4RelaxedTruncSatF32x4S => I::I32x4RelaxedTruncF32x4S,
+		O::I32x4RelaxedTruncSatF32x4U => I::I32x4RelaxedTruncF32x4U,
+		O::I32x4RelaxedTruncSatF64x2SZero => I::I32x4RelaxedTruncF64x2SZero,
+		O::I32x4RelaxedTruncSatF64x2UZero => I::I32x4RelaxedTruncF64x2UZero,
+		O::F32x4RelaxedFma => I::F32x4RelaxedMadd,
+		O::F32x4RelaxedFnma => I::F32x4RelaxedNmadd,
+		O::F64x2RelaxedFma => I::F64x2RelaxedMadd,
+		O::F64x2RelaxedFnma => I::F64x2RelaxedNmadd,
 		O::I8x16RelaxedLaneselect => I::I8x16RelaxedLaneselect,
 		O::I16x8RelaxedLaneselect => I::I16x8RelaxedLaneselect,
 		O::I32x4RelaxedLaneselect => I::I32x4RelaxedLaneselect,
@@ -848,9 +883,10 @@ pub fn op(t: &dyn Translator, op: &Operator<'_>) -> Result<Instruction<'static>,
 		O::F64x2RelaxedMin => I::F64x2RelaxedMin,
 		O::F64x2RelaxedMax => I::F64x2RelaxedMax,
 		O::I16x8RelaxedQ15mulrS => I::I16x8RelaxedQ15mulrS,
-		O::I16x8DotI8x16I7x16S => I::I16x8DotI8x16I7x16S,
-		O::I32x4DotI8x16I7x16AddS => I::I32x4DotI8x16I7x16AddS,
-		O::F32x4RelaxedDotBf16x8AddF32x4 => I::F32x4RelaxedDotBf16x8AddF32x4,
+		O::I16x8DotI8x16I7x16S => I::I16x8RelaxedDotI8x16I7x16S,
+		O::I32x4DotI8x16I7x16AddS => I::I32x4RelaxedDotI8x16I7x16AddS,
+		O::I8x16AvgrU => I::I8x16AvgrU,
+		O::I16x8AvgrU => I::I16x8AvgrU,
 
 		// Note that these cases are not supported in `wasm_encoder` yet,
 		// and in general `wasmparser` often parses more things than
@@ -925,7 +961,10 @@ pub fn op(t: &dyn Translator, op: &Operator<'_>) -> Result<Instruction<'static>,
 		| O::I64AtomicRmw32CmpxchgU { .. }
 		| O::ReturnCall { .. }
 		| O::ReturnCallIndirect { .. }
-		| O::AtomicFence { .. } => return Err(stringify!("no_mutations_applicable")),
+		| O::AtomicFence { .. }
+		// TODO
+		| O::F32x4RelaxedDotBf16x8AddF32x4
+		| O::MemoryDiscard { .. } => return Err(stringify!("no_mutations_applicable")),
 	})
 }
 
@@ -971,19 +1010,24 @@ pub fn code(
 	body: FunctionBody<'_>,
 	s: &mut CodeSection,
 ) -> Result<(), &'static str> {
-	let locals = body
-		.get_locals_reader()?
+	let mut local_reader = body.get_locals_reader().map_err(|err| stringify!(err))?;
+
+	let locals = local_reader
 		.into_iter()
-		.map(|local| {
-			let (cnt, ty) = local?;
-			Ok((cnt, t.translate_ty(&ty)?))
+		.map(|item| match item {
+			Ok((val, ty)) => {
+				let ty = t.translate_ty(&ty)?;
+				Ok((val, ty))
+			},
+			Err(err) => Err(stringify!(err)),
 		})
-		.collect::<Result<Vec<_>>>()?;
+		.collect::<Result<Vec<(u32, wasm_encoder::ValType)>, &'static str>>()?;
+
 	let mut func = Function::new(locals);
 
-	let reader = body.get_operators_reader()?;
-	for op in reader {
-		let op = op?;
+	let mut op_reader = body.get_operators_reader().map_err(|err| stringify!(err))?;
+	for op in op_reader {
+		let op = op.map_err(|err| stringify!(err))?;
 		func.instruction(&t.translate_op(&op)?);
 	}
 	s.function(&func);
