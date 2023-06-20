@@ -1,36 +1,40 @@
 //! Contains the code for the stack height limiter instrumentation.
 
-use alloc::{vec, vec::Vec};
-use core::mem;
-use parity_wasm::{
-	builder,
-	elements::{self, Instruction, Instructions, Type},
+use crate::parser::{
+	copy_locals,
+	translator::{DefaultTranslator, Translator},
+	ModuleInfo,
 };
+use alloc::{vec, vec::Vec};
+use wasm_encoder::{
+	CodeSection, ConstExpr, Function, GlobalSection, GlobalType, SectionId, ValType,
+};
+use wasmparser::{CodeSectionReader, FunctionBody, GlobalSectionReader, Operator};
 
 /// Macro to generate preamble and postamble.
 macro_rules! instrument_call {
 	($callee_idx: expr, $callee_stack_cost: expr, $stack_height_global_idx: expr, $stack_limit: expr) => {{
-		use $crate::parity_wasm::elements::Instruction::*;
+		use wasm_encoder::Instruction::*;
 		[
 			// stack_height += stack_cost(F)
-			GetGlobal($stack_height_global_idx),
+			GlobalGet($stack_height_global_idx),
 			I32Const($callee_stack_cost),
 			I32Add,
-			SetGlobal($stack_height_global_idx),
+			GlobalSet($stack_height_global_idx),
 			// if stack_counter > LIMIT: unreachable
-			GetGlobal($stack_height_global_idx),
+			GlobalGet($stack_height_global_idx),
 			I32Const($stack_limit as i32),
 			I32GtU,
-			If(elements::BlockType::NoResult),
+			If(wasm_encoder::BlockType::Empty),
 			Unreachable,
 			End,
 			// Original call
 			Call($callee_idx),
 			// stack_height -= stack_cost(F)
-			GetGlobal($stack_height_global_idx),
+			GlobalGet($stack_height_global_idx),
 			I32Const($callee_stack_cost),
 			I32Sub,
-			SetGlobal($stack_height_global_idx),
+			GlobalSet($stack_height_global_idx),
 		]
 	}};
 }
@@ -140,7 +144,7 @@ fn generate_stack_height_global(module: &mut elements::Module) -> u32 {
 	for section in module.sections_mut() {
 		if let elements::Section::Global(gs) = section {
 			gs.entries_mut().push(global_entry);
-			return (gs.entries().len() as u32) - 1
+			return (gs.entries().len() as u32) - 1;
 		}
 	}
 
@@ -303,7 +307,7 @@ fn instrument_function(ctx: &mut Context, func: &mut Instructions) -> Result<(),
 	}
 
 	if calls.next().is_some() {
-		return Err("Not all calls were used")
+		return Err("Not all calls were used");
 	}
 
 	Ok(())

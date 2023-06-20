@@ -9,10 +9,11 @@ use alloc::vec::Vec;
 #[cfg(features = "std")]
 use std::collections::HashMap as Map;
 use wasm_encoder::{
-	CodeSection, ElementMode, ElementSection, Elements, ExportSection, FunctionSection, SectionId,
+	CodeSection, ElementMode, ElementSection, ElementSegment, Elements, ExportSection,
+	FunctionSection, RefType, SectionId,
 };
 use wasmparser::{
-	CodeSectionReader, ElementItem, ElementItems, ElementKind, ElementSectionReader,
+	CodeSectionReader, Element, ElementItems, ElementKind, ElementSectionReader, Export,
 	ExportSectionReader, ExternalKind, FuncType, FunctionSectionReader, Result as WasmParserResult,
 	Type,
 };
@@ -30,17 +31,17 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 		Some(raw_sec) => ExportSectionReader::new(&raw_sec.data, 0)
 			.map_err(|err| stringify!(err))?
 			.into_iter()
-			.collect::<WasmParserResult<Vec<wasmparser::Export>>>()
+			.collect::<WasmParserResult<Vec<Export>>>()
 			.map_err(|err| stringify!(err))?,
 		None => vec![],
 	};
 
 	//element maybe null
-	let elem_segments = match module.raw_sections.get(&SectionId::Element.into()) {
+	let elements = match module.raw_sections.get(&SectionId::Element.into()) {
 		Some(v) => ElementSectionReader::new(&v.data, 0)
 			.map_err(|err| stringify!(err))?
 			.into_iter()
-			.collect::<WasmParserResult<Vec<wasmparser::Element>>>()
+			.collect::<WasmParserResult<Vec<Element>>>()
 			.map_err(|err| stringify!(err))?,
 		None => vec![],
 	};
@@ -52,8 +53,8 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 		});
 
 		let mut table_func_indices = vec![];
-		for segment in elem_segments.clone() {
-			match segment.items {
+		for elem in elements.clone() {
+			match elem.items {
 				ElementItems::Functions(func_indexes) => {
 					let segment_func_indices = &func_indexes
 						.into_iter()
@@ -121,10 +122,14 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 	let func_sec_data = &module
 		.raw_sections
 		.get(&SectionId::Function.into())
-		.ok_or_else(|| anyhow!("no function section"))? //todo allow empty function file?
+		.ok_or_else(|| stringify!("no function section"))? //todo allow empty function file?
 		.data;
-	for func_body in FunctionSectionReader::new(func_sec_data, 0)? {
-		func_sec_builder.function(func_body?);
+
+	let func_sec_reader =
+		FunctionSectionReader::new(func_sec_data, 0).map_err(|err| stringify!(err))?;
+	for func_body in func_sec_reader {
+		let func_body = func_body.map_err(|err| stringify!(err))?;
+		func_sec_builder.function(func_body);
 	}
 
 	let mut next_func_idx = module.function_map.len() as u32;
@@ -153,7 +158,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 
 		let func_type = module
 			.resolve_type_idx(&Type::Func(thunk.signature.clone()))
-			.ok_or_else(|| anyhow!("signature not exit"))?; //resolve thunk func type, this signature should exit
+			.ok_or_else(|| stringify!("signature not exit"))?; //resolve thunk func type, this signature should exit
 		func_sec_builder.function(func_type); //add thunk function
 		func_body_sec_builder.function(&thunk_body); //add thunk body
 
@@ -164,35 +169,87 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 	// And finally, fixup thunks in export and table sections.
 
 	// Fixup original function index to a index of a thunk generated earlier.
-	let fixup = |function_idx: &mut u32| {
-		// Check whether this function is in replacement_map, since
-		// we can skip thunk generation (e.g. if stack_cost of function is 0).
-		if let Some(thunk) = replacement_map.get(function_idx) {
-			*function_idx =
-				thunk.idx.expect("At this point an index must be assigned to each thunk");
+	let mut export_sec_builder = ExportSection::new();
+	for export in exports {
+		let mut function_idx = export.index;
+		if let ExternalKind::Func = export.kind {
+			if let Some(thunk) = replacement_map.get(&function_idx) {
+				function_idx =
+					thunk.idx.expect("at this point an index must be assigned to each thunk");
+			}
 		}
-	};
-
-	for section in module.sections_mut() {
-		match section {
-			elements::Section::Export(export_section) => {
-				for entry in export_section.entries_mut() {
-					if let Internal::Function(function_idx) = entry.internal_mut() {
-						fixup(function_idx)
-					}
-				}
-			},
-			elements::Section::Element(elem_section) => {
-				for segment in elem_section.entries_mut() {
-					for function_idx in segment.members_mut() {
-						fixup(function_idx)
-					}
-				}
-			},
-			elements::Section::Start(start_idx) => fixup(start_idx),
-			_ => {},
-		}
+		export_sec_builder.export(
+			export.name,
+			DefaultTranslator
+				.translate_export_kind(export.kind)
+				.map_err(|err| stringify!(err))?,
+			function_idx,
+		);
 	}
 
-	Ok(module)
+	let mut ele_sec_builder = ElementSection::new();
+	for elem in elements.clone() {
+		let mut functions = vec![];
+		match elem.items {
+			ElementItems::Functions(func_indexes) => {
+				for item in func_indexes.into_iter() {
+					let func_idx = item.map_err(|err| stringify!(err))?;
+
+					if let Some(thunk) = replacement_map.get(&func_idx) {
+						let new_func_idx = thunk.idx.ok_or_else(|| {
+							stringify!("at this point an index must be assigned to each thunk")
+						})?; //resolve thunk func type, this signature should exit
+						functions.push(new_func_idx);
+					}
+				}
+			},
+			ElementItems::Expressions(_) => return Err("element must be func here"),
+		}
+
+		//todo edit element is little complex,
+		let mode = match elem.kind {
+			ElementKind::Active { table_index, offset_expr } => {
+				let offset = DefaultTranslator
+					.translate_const_expr(
+						&offset_expr,
+						&wasmparser::ValType::I32,
+						ConstExprKind::ElementOffset,
+					)
+					.map_err(|err| stringify!(err))?;
+				ElementMode::Active { table: Some(table_index), offset: &offset }
+			},
+			ElementKind::Passive => ElementMode::Passive,
+			ElementKind::Declared => ElementMode::Declared,
+		};
+
+		let element_type =
+			DefaultTranslator.translate_ty(&elem.ty).map_err(|err| stringify!(err))?;
+		let elements = Elements::Functions(&functions);
+
+		ele_sec_builder.segment(ElementSegment {
+			mode,
+			/// The element type.
+			element_type: RefType::FUNCREF,
+			/// The element functions.
+			elements,
+		});
+	}
+
+	module.replace_section(SectionId::Function.into(), &func_sec_builder)?;
+	module.replace_section(SectionId::Code.into(), &func_body_sec_builder)?;
+	module.replace_section(SectionId::Export.into(), &export_sec_builder)?;
+	module.replace_section(SectionId::Element.into(), &ele_sec_builder)?;
+	if let Some(start_idx) = module.start_function {
+		let mut new_func_idx = start_idx;
+		if let Some(thunk) = replacement_map.get(&start_idx) {
+			new_func_idx =
+				thunk.idx.expect("at this point an index must be assigned to each thunk");
+		}
+
+		module.replace_section(
+			SectionId::Start.into(),
+			&wasm_encoder::StartSection { function_index: new_func_idx },
+		)?;
+	}
+	Ok(())
 }

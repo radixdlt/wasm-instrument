@@ -1,6 +1,5 @@
 pub mod translator;
 use crate::parser::translator::{DefaultTranslator, Translator};
-use anyhow::{anyhow, Result};
 use std::{
 	collections::{BTreeMap, HashSet},
 	ops::Range,
@@ -279,7 +278,7 @@ impl ModuleInfo {
 		&mut self,
 		sec_type: u8,
 		new_section: &impl wasm_encoder::Section,
-	) -> Result<()> {
+	) -> Result<(), &'static str> {
 		self.raw_sections
 			.insert(sec_type, RawSection::new(sec_type, truncate_len_from_encoder(new_section)?));
 		Ok(())
@@ -293,7 +292,7 @@ impl ModuleInfo {
 			&self
 				.raw_sections
 				.get(&SectionId::Function.into())
-				.ok_or_else(|| anyhow!("code not exit"))?
+				.ok_or_else(|| stringify!("code not exit"))?
 				.data,
 			0,
 		)?;
@@ -309,7 +308,7 @@ impl ModuleInfo {
 			&self
 				.raw_sections
 				.get(&SectionId::Code.into())
-				.ok_or_else(|| anyhow!("code not exit"))?
+				.ok_or_else(|| stringify!("code not exit"))?
 				.data,
 			0,
 		)?;
@@ -426,10 +425,13 @@ pub fn copy_locals(
 }
 
 //todo unable to get function encoder body directly, remove this after option wasmparser
-pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Result<Vec<u8>> {
+pub fn truncate_len_from_encoder(
+	func_builder: &dyn wasm_encoder::Encode,
+) -> Result<Vec<u8>, &'static str> {
 	let mut d = vec![];
 	func_builder.encode(&mut d);
 	let mut r = wasmparser::BinaryReader::new(&d);
-	let size = r.read_var_u32()?;
-	Ok(r.read_bytes(size as usize)?.to_vec())
+	let size = r.read_var_u32().map_err(|err| stringify!(err))?;
+	let bytes = r.read_bytes(size as usize).map_err(|err| stringify!(err))?;
+	Ok(bytes.to_vec())
 }
