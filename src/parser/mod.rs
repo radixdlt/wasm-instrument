@@ -1,15 +1,13 @@
 pub mod translator;
 use crate::parser::translator::{DefaultTranslator, Translator};
+use anyhow::{anyhow, Result};
 use std::{
 	collections::{BTreeMap, HashSet},
 	ops::Range,
 };
 
-use wasm_encoder::{CodeSection, Encode, SectionId};
-use wasmparser::{
-	Chunk, CodeSectionReader, ExternalKind, FunctionSectionReader, GlobalType, MemoryType, Parser,
-	Payload, TableType, Type,
-};
+use wasm_encoder::{Encode, SectionId};
+use wasmparser::{Chunk, ExternalKind, GlobalType, MemoryType, Parser, Payload, TableType, Type};
 
 #[derive(Clone, Debug)]
 pub struct RawSection {
@@ -83,14 +81,13 @@ pub struct ModuleInfo {
 
 impl ModuleInfo {
 	/// Parse the given Wasm bytes and fill out a `ModuleInfo` AST for it.
-	pub fn new(input_wasm: &[u8]) -> Result<ModuleInfo, &'static str> {
+	pub fn new(input_wasm: &[u8]) -> Result<ModuleInfo> {
 		let mut parser = Parser::new(0);
 		let mut info = ModuleInfo::default();
 		let mut wasm = input_wasm;
 
 		loop {
-			let chunk = parser.parse(wasm, true).map_err(|err| stringify!(err))?;
-			let (payload, consumed) = match chunk {
+			let (payload, consumed) = match parser.parse(wasm, true)? {
 				Chunk::NeedMoreData(hint) => {
 					panic!("Invalid Wasm module {:?}", hint);
 				},
@@ -109,18 +106,17 @@ impl ModuleInfo {
 					info.section(SectionId::Type.into(), reader.range(), input_wasm);
 
 					// Save function types
-					for r in reader.into_iter_with_offsets() {}
-					for result in reader.into_iter() {
-						let ty = result.map_err(|err| stringify!(err))?;
-						info.types_map.push(ty);
+					for ty in reader.into_iter() {
+						info.types_map.push(ty?);
 					}
 				},
 				Payload::ImportSection(mut reader) => {
 					info.section(SectionId::Import.into(), reader.range(), input_wasm);
 
-					for result in reader.into_iter() {
-						let ty = result.map_err(|err| stringify!(err))?;
-						match ty.ty {
+					//for _ in 0..reader.get_count()
+					for import in reader.into_iter() {
+						let import = import?;
+						match import.ty {
 							wasmparser::TypeRef::Func(ty) => {
 								// Save imported functions
 								info.function_map.push(ty);
@@ -150,46 +146,44 @@ impl ModuleInfo {
 				Payload::FunctionSection(mut reader) => {
 					info.section(SectionId::Function.into(), reader.range(), input_wasm);
 
-					for result in reader.into_iter() {
-						let ty = result.map_err(|err| stringify!(err))?;
-						info.function_map.push(ty);
+					for func_idx in reader.into_iter() {
+						info.function_map.push(func_idx?);
 					}
 				},
 				Payload::TableSection(mut reader) => {
 					info.table_count += reader.count();
 					info.section(SectionId::Table.into(), reader.range(), input_wasm);
 
-					for result in reader.into_iter() {
-						let ty = result.map_err(|err| stringify!(err))?;
-						info.table_elem_types.push(ty);
+					for table in reader.into_iter() {
+						let table = table?;
+						info.table_elem_types.push(table.ty);
 					}
 				},
 				Payload::MemorySection(mut reader) => {
 					info.memory_count += reader.count();
 					info.section(SectionId::Memory.into(), reader.range(), input_wasm);
 
-					for result in reader.into_iter() {
-						let ty = result.map_err(|err| stringify!(err))?;
-						info.memory_types.push(ty);
+					for ty in reader.into_iter() {
+						info.memory_types.push(ty?);
 					}
 				},
 				Payload::GlobalSection(mut reader) => {
 					info.section(SectionId::Global.into(), reader.range(), input_wasm);
 
-					for result in reader.into_iter() {
-						let ty = result.map_err(|err| stringify!(err))?;
-						info.global_types.push(ty.ty);
+					for global in reader.into_iter() {
+						let global = global?;
+						info.global_types.push(global.ty);
 					}
 				},
 				Payload::ExportSection(mut reader) => {
 					info.exports_count = reader.count();
 
-					for result in reader.into_iter() {
-						let entry = result.map_err(|err| stringify!(err))?;
-						if let ExternalKind::Global = entry.kind {
+					for export in reader.into_iter() {
+						let export = export?;
+						if let ExternalKind::Global = export.kind {
 							info.exports_global_count += 1;
 						}
-						info.export_names.insert(entry.name.into());
+						info.export_names.insert(export.name.into());
 					}
 
 					info.section(SectionId::Export.into(), reader.range(), input_wasm);
@@ -232,13 +226,13 @@ impl ModuleInfo {
 
 	/// Returns the function type based on the index of the function type
 	/// `types[functions[idx]]`
-	pub fn get_functype_idx(&self, idx: u32) -> Result<&Type, &'static str> {
+	pub fn get_functype_idx(&self, idx: u32) -> Result<&Type> {
 		if idx >= self.function_map.len() as u32 {
-			return Err(&format!("function {} not exit", idx));
+			return Err(anyhow!("function {} not exit", idx));
 		}
 		let functpeindex = self.function_map[idx as usize] as usize;
 		if functpeindex >= self.types_map.len() {
-			return Err(&format!("type {} not exit", functpeindex));
+			return Err(anyhow!("type {} not exit", functpeindex));
 		}
 		Ok(&self.types_map[functpeindex])
 	}
@@ -254,7 +248,7 @@ impl ModuleInfo {
 		None
 	}
 
-	pub fn add_func_type(&mut self, func_type: &Type) -> Result<u32, &'static str> {
+	pub fn add_func_type(&mut self, func_type: &Type) -> Result<u32> {
 		let func_type_index = match self.resolve_type_idx(func_type) {
 			None => self.types_map.len() as u32,
 			Some(index) => return Ok(index),
@@ -282,55 +276,45 @@ impl ModuleInfo {
 		&mut self,
 		sec_type: u8,
 		new_section: &impl wasm_encoder::Section,
-	) -> Result<(), &'static str> {
+	) -> Result<()> {
 		self.raw_sections
 			.insert(sec_type, RawSection::new(sec_type, truncate_len_from_encoder(new_section)?));
 		Ok(())
 	}
 
-	pub fn add_func(
-		&mut self,
-		func_type: Type,
-		func_body: &wasm_encoder::Function,
-	) -> Result<(), &'static str> {
+	pub fn add_func(&mut self, func_type: Type, func_body: &wasm_encoder::Function) -> Result<()> {
 		let func_type_index = self.add_func_type(&func_type)?;
 
-		// Function section
-		let mut function_section_builder = wasm_encoder::FunctionSection::new();
-		let function_section_data = &self
-			.raw_sections
-			.get(&SectionId::Function.into())
-			.ok_or_else(|| stringify!("no function section"))? //todo allow empty function file?
-			.data;
-		let function_section_reader =
-			FunctionSectionReader::new(function_section_data, 0).map_err(|err| stringify!(err))?;
-
-		for function in function_section_reader {
-			let function = function.map_err(|err| stringify!(err))?;
-			function_section_builder.function(function);
+		let mut func_sec_builder = wasm_encoder::FunctionSection::new();
+		let func_sec_reader = wasmparser::FunctionSectionReader::new(
+			&self
+				.raw_sections
+				.get(&SectionId::Function.into())
+				.ok_or_else(|| anyhow!("code not exit"))?
+				.data,
+			0,
+		)?;
+		for func in func_sec_reader {
+			func_sec_builder.function(func?);
 		}
 		self.function_map.push(func_type_index);
-		function_section_builder.function(func_type_index);
-		self.replace_section(SectionId::Function.into(), &function_section_builder)?;
+		func_sec_builder.function(func_type_index);
+		self.replace_section(SectionId::Function.into(), &func_sec_builder)?;
 
-		// Code section
-		let mut code_section_builder = CodeSection::new();
-		let code_section_data = &self
-			.raw_sections
-			.get(&SectionId::Code.into())
-			.ok_or_else(|| stringify!("no function body"))?
-			.data;
-
-		let code_section_reader =
-			CodeSectionReader::new(code_section_data, 0).map_err(|err| stringify!(err))?;
-		for code in code_section_reader {
-			let code = code.map_err(|err| stringify!(err))?;
-			DefaultTranslator
-				.translate_code(code, &mut code_section_builder)
-				.map_err(|err| stringify!(err))?;
+		let mut code_sec_builder = wasm_encoder::CodeSection::new();
+		let code_sec_reader = wasmparser::CodeSectionReader::new(
+			&self
+				.raw_sections
+				.get(&SectionId::Code.into())
+				.ok_or_else(|| anyhow!("code not exit"))?
+				.data,
+			0,
+		)?;
+		for code in code_sec_reader {
+			DefaultTranslator.translate_code(code?, &mut code_sec_builder)?
 		}
-		code_section_builder.function(func_body);
-		self.replace_section(SectionId::Code.into(), &code_section_builder)
+		code_sec_builder.function(func_body);
+		self.replace_section(SectionId::Code.into(), &code_sec_builder)
 	}
 
 	pub fn bytes(&self) -> Vec<u8> {
@@ -425,31 +409,24 @@ impl ModuleInfo {
 // Then insert metering calls into a sequence of instructions given the block locations and costs.
 pub fn copy_locals(
 	func_body: &wasmparser::FunctionBody,
-) -> Result<Vec<(u32, wasm_encoder::ValType)>, &'static str> {
-	let mut local_reader = func_body.get_locals_reader().map_err(|err| stringify!(err))?;
-
-	let current_locals = local_reader
-		.into_iter()
-		.map(|item| match item {
-			Ok((val, ty)) => {
-				let ty = DefaultTranslator.translate_ty(&ty)?;
-				Ok((val, ty))
-			},
-			Err(err) => Err(stringify!(err)),
+) -> Result<Vec<(u32, wasm_encoder::ValType)>> {
+	let mut local_reader = func_body.get_locals_reader()?;
+	// Get current locals and map to encoder types
+	let current_locals: Vec<(u32, wasm_encoder::ValType)> = (0..local_reader.get_count())
+		.map(|_| {
+			let (count, ty) = local_reader.read().unwrap();
+			(count, DefaultTranslator.translate_ty(&ty).unwrap())
 		})
-		.collect::<Result<Vec<(u32, wasm_encoder::ValType)>, &'static str>>()?;
+		.collect::<Vec<(u32, wasm_encoder::ValType)>>();
 
 	Ok(current_locals)
 }
 
 //todo unable to get function encoder body directly, remove this after option wasmparser
-pub fn truncate_len_from_encoder(
-	func_builder: &dyn wasm_encoder::Encode,
-) -> Result<Vec<u8>, &'static str> {
+pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Result<Vec<u8>> {
 	let mut d = vec![];
 	func_builder.encode(&mut d);
 	let mut r = wasmparser::BinaryReader::new(&d);
-	let size = r.read_var_u32().map_err(|err| stringify!(err))?;
-	let bytes = r.read_bytes(size as usize).map_err(|err| stringify!(err))?;
-	Ok(bytes.to_vec())
+	let size = r.read_var_u32()?;
+	Ok(r.read_bytes(size as usize)?.to_vec())
 }
