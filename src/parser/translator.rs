@@ -1,6 +1,7 @@
 use wasm_encoder::{ExportKind, *};
 use wasmparser::{
-	DataKind, ElementItem, ElementKind, ExternalKind, FunctionBody, Global, Import, Operator, Type,
+	DataKind, Element, ElementItems, ElementKind, ExternalKind, FunctionBody, Global, Import,
+	Operator, Type,
 };
 
 #[allow(unused)]
@@ -280,8 +281,8 @@ pub fn const_expr(
 
 pub fn element(
 	t: &dyn Translator,
-	element: wasmparser::Element<'_>,
-	s: &mut ElementSection,
+	element: Element<'_>,
+	section: &mut ElementSection,
 ) -> Result<(), &'static str> {
 	let offset;
 	let mode = match &element.kind {
@@ -298,32 +299,37 @@ pub fn element(
 	};
 
 	let element_type = t.translate_ty(&element.ty)?;
-	let mut functions = Vec::new();
-	let mut exprs = Vec::new();
-	let mut reader = element.items.get_items_reader()?;
-	for _ in 0..reader.get_count() {
-		match reader.read()? {
-			ElementItem::Func(idx) => {
-				functions.push(idx);
-			},
-			ElementItem::Expr(expr) => {
-				exprs.push(t.translate_const_expr(
-					&expr,
-					&element.ty,
-					ConstExprKind::ElementFunction,
-				)?);
-			},
-		}
-	}
-	s.segment(ElementSegment {
-		mode,
-		element_type,
-		elements: if reader.uses_exprs() {
-			Elements::Expressions(&exprs)
-		} else {
-			Elements::Functions(&functions)
+	let elements = match element.items {
+		ElementItems::Functions(func_indexes) => {
+			//			let mut functions = vec![];
+			let segment_func_indices = func_indexes
+				.into_iter()
+				.map(|item| match item {
+					Ok(idx) => Ok(idx),
+					Err(err) => Err(stringify!(err)),
+				})
+				.collect::<Result<Vec<u32>, &'static str>>()?;
+
+			Elements::Functions(&segment_func_indices)
 		},
-	});
+		ElementItems::Expressions(expr) => {
+			let expressions = expr
+				.into_iter()
+				.map(|item| match item {
+					Ok(expr) => {
+						let const_expr =
+							t.translate_const_expr(&expr, &element.ty, &element.kind)?;
+						Ok(const_expr)
+					},
+					Err(err) => Err(stringify!(err)),
+				})
+				.collect::<Result<ConstExpr>, &'static str>()?;
+
+			Elements::Expressions(&expressions)
+		},
+	};
+
+	section.segment(ElementSegment { mode, element_type, elements });
 	Ok(())
 }
 
