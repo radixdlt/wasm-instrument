@@ -122,7 +122,7 @@ pub fn inject(module_info: &mut ModuleInfo, stack_limit: u32) -> Result<Vec<u8>>
 		stack_limit,
 	};
 
-	instrument_functions(&mut ctx, &mut module_info)?;
+	instrument_functions(&mut ctx, module_info)?;
 	thunk::generate_thunks(&mut ctx, module_info)?;
 
 	Ok(module_info.bytes())
@@ -161,7 +161,7 @@ fn compute_stack_costs(module: &mut ModuleInfo) -> Result<Vec<u32>> {
 				// We can't calculate stack_cost of the import functions.
 				Ok(0)
 			} else {
-				compute_stack_cost(func_idx as u32, module)
+				compute_stack_cost(func_idx, module)
 			}
 		})
 		.collect()
@@ -318,7 +318,7 @@ mod tests {
 
 	#[test]
 	fn test_with_params_and_result() {
-		let raw_wasm = parse_wat(
+		let mut module_info = parse_wat(
 			r#"(module
 						(func (export "i32.add") (param i32 i32) (result i32)
 							get_local 0
@@ -326,10 +326,10 @@ mod tests {
 							i32.add
 						)
 					)"#,
-		)
-		.bytes();
+		);
 
-		let inject_raw_wasm = inject(&raw_wasm, 1024).expect("Failed to inject stack counter");
+		let inject_raw_wasm =
+			inject(&mut module_info, 1024).expect("Failed to inject stack counter");
 		wasmparser::validate(&inject_raw_wasm).expect("Invalid module");
 	}
 }

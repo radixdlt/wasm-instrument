@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap as Map;
 use wasm_encoder::{
 	CodeSection, ElementMode, ElementSection, ElementSegment, Elements, ExportSection,
-	FunctionSection, RefType, SectionId,
+	FunctionSection, SectionId,
 };
 use wasmparser::{
 	CodeSectionReader, Element, ElementItems, ElementKind, ElementSectionReader, Export,
@@ -53,8 +53,6 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 		for elem in elements.clone() {
 			match elem.items {
 				ElementItems::Functions(func_indexes) => {
-					for i in func_indexes.into_iter() {}
-
 					let segment_func_indices: Vec<u32> = func_indexes
 						.into_iter()
 						.map(|item| match item {
@@ -87,7 +85,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 						signature: match module.get_functype_idx(func_idx)?.clone() {
 							Type::Func(ft) => ft,
 							// TODO: proper handling of Array
-							Type::Array(at) => todo!(),
+							Type::Array(_) => todo!(),
 						},
 						idx: None,
 						callee_stack_cost,
@@ -198,16 +196,16 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 			ElementItems::Expressions(_) => return Err(anyhow!("element must be func here")),
 		}
 
+		let offset;
 		//todo edit element is little complex,
 		let mode = match elem.kind {
 			ElementKind::Active { table_index, offset_expr } => {
-				let offset = DefaultTranslator
-					.translate_const_expr(
-						&offset_expr,
-						&wasmparser::ValType::I32,
-						ConstExprKind::ElementOffset,
-					)
-					.map_err(|err| anyhow!(err))?;
+				offset = DefaultTranslator.translate_const_expr(
+					&offset_expr,
+					&wasmparser::ValType::I32,
+					ConstExprKind::ElementOffset,
+				)?;
+
 				ElementMode::Active { table: table_index, offset: &offset }
 			},
 			ElementKind::Passive => ElementMode::Passive,
@@ -220,7 +218,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 		ele_sec_builder.segment(ElementSegment {
 			mode,
 			/// The element type.
-			element_type: RefType::FUNCREF,
+			element_type,
 			/// The element functions.
 			elements,
 		});
