@@ -15,6 +15,7 @@ pub enum Item {
 	Element,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub enum ConstExprKind {
 	Global,
@@ -151,6 +152,7 @@ pub fn type_def(t: &mut dyn Translator, ty: Type, s: &mut TypeSection) -> Result
 	}
 }
 
+#[allow(dead_code)]
 pub fn table_type(
 	t: &mut dyn Translator,
 	ty: &wasmparser::TableType,
@@ -162,6 +164,7 @@ pub fn table_type(
 	})
 }
 
+#[allow(dead_code)]
 pub fn memory_type(
 	_t: &mut dyn Translator,
 	ty: &wasmparser::MemoryType,
@@ -184,6 +187,7 @@ pub fn global_type(
 	})
 }
 
+#[allow(dead_code)]
 pub fn tag_type(t: &mut dyn Translator, ty: &wasmparser::TagType) -> Result<wasm_encoder::TagType> {
 	Ok(wasm_encoder::TagType {
 		kind: TagKind::Exception,
@@ -276,6 +280,7 @@ pub fn const_expr(
 	Ok(wasm_encoder::ConstExpr::raw(offset_bytes))
 }
 
+#[allow(dead_code)]
 pub fn element(
 	t: &mut dyn Translator,
 	element: wasmparser::Element<'_>,
@@ -427,6 +432,7 @@ pub fn memarg(t: &mut dyn Translator, memarg: &wasmparser::MemArg) -> Result<Mem
 	})
 }
 
+#[allow(dead_code)]
 pub fn data(t: &mut dyn Translator, data: wasmparser::Data<'_>, s: &mut DataSection) -> Result<()> {
 	let offset;
 	let mode = match &data.kind {
