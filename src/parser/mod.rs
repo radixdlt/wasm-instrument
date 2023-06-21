@@ -102,7 +102,7 @@ impl ModuleInfo {
 
 					continue;
 				},
-				Payload::TypeSection(mut reader) => {
+				Payload::TypeSection(reader) => {
 					info.section(SectionId::Type.into(), reader.range(), input_wasm);
 
 					// Save function types
@@ -110,7 +110,7 @@ impl ModuleInfo {
 						info.types_map.push(ty?);
 					}
 				},
-				Payload::ImportSection(mut reader) => {
+				Payload::ImportSection(reader) => {
 					info.section(SectionId::Import.into(), reader.range(), input_wasm);
 
 					//for _ in 0..reader.get_count()
@@ -143,14 +143,14 @@ impl ModuleInfo {
 						}
 					}
 				},
-				Payload::FunctionSection(mut reader) => {
+				Payload::FunctionSection(reader) => {
 					info.section(SectionId::Function.into(), reader.range(), input_wasm);
 
 					for func_idx in reader.into_iter() {
 						info.function_map.push(func_idx?);
 					}
 				},
-				Payload::TableSection(mut reader) => {
+				Payload::TableSection(reader) => {
 					info.table_count += reader.count();
 					info.section(SectionId::Table.into(), reader.range(), input_wasm);
 
@@ -159,7 +159,7 @@ impl ModuleInfo {
 						info.table_elem_types.push(table.ty);
 					}
 				},
-				Payload::MemorySection(mut reader) => {
+				Payload::MemorySection(reader) => {
 					info.memory_count += reader.count();
 					info.section(SectionId::Memory.into(), reader.range(), input_wasm);
 
@@ -167,7 +167,7 @@ impl ModuleInfo {
 						info.memory_types.push(ty?);
 					}
 				},
-				Payload::GlobalSection(mut reader) => {
+				Payload::GlobalSection(reader) => {
 					info.section(SectionId::Global.into(), reader.range(), input_wasm);
 
 					for global in reader.into_iter() {
@@ -175,10 +175,10 @@ impl ModuleInfo {
 						info.global_types.push(global.ty);
 					}
 				},
-				Payload::ExportSection(mut reader) => {
+				Payload::ExportSection(reader) => {
 					info.exports_count = reader.count();
 
-					for export in reader.into_iter() {
+					for export in reader.clone().into_iter() {
 						let export = export?;
 						if let ExternalKind::Global = export.kind {
 							info.exports_global_count += 1;

@@ -72,14 +72,14 @@ pub trait Translator {
 	}
 
 	fn translate_export_kind(
-		&self,
+		&mut self,
 		g: wasmparser::ExternalKind,
 	) -> Result<wasm_encoder::ExportKind> {
 		export_kind(self.as_obj(), g)
 	}
 
 	fn translate_export(
-		&self,
+		&mut self,
 		e: &wasmparser::Export,
 		sec: &mut wasm_encoder::ExportSection,
 	) -> Result<()> {
@@ -243,7 +243,7 @@ pub fn export_kind(_: &dyn Translator, kind: ExternalKind) -> Result<ExportKind>
 
 #[allow(unused)]
 pub fn export(
-	t: &dyn Translator,
+	t: &mut dyn Translator,
 	e: &wasmparser::Export<'_>,
 	sec: &mut wasm_encoder::ExportSection,
 ) -> Result<()> {
