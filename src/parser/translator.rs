@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use anyhow::{anyhow, Result};
 use wasm_encoder::*;
 use wasmparser::{DataKind, ElementKind, ExternalKind, FunctionBody, Global, Operator, Type};

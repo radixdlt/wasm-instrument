@@ -1,11 +1,10 @@
+use alloc::string::String;
+use alloc::{vec, vec::Vec};
 pub mod translator;
 use crate::parser::translator::{DefaultTranslator, Translator};
+use alloc::collections::{BTreeMap, BTreeSet};
 use anyhow::{anyhow, Result};
-use std::{
-	collections::{BTreeMap, HashSet},
-	ops::Range,
-};
-
+use core::ops::Range;
 use wasm_encoder::{Encode, SectionId};
 use wasmparser::{
 	Chunk, Export, ExportSectionReader, ExternalKind, Global, GlobalSectionReader, GlobalType,
@@ -51,7 +50,7 @@ impl wasm_encoder::ComponentSection for RawSection {
 pub struct ModuleInfo {
 	// The following fields are offsets inside the `raw_sections` field.
 	// The main idea is to maintain the order of the sections in the input Wasm.
-	pub export_names: HashSet<String>,
+	pub export_names: BTreeSet<String>,
 
 	pub exports_count: u32,
 	pub exports_global_count: u32,

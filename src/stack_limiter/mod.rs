@@ -1,10 +1,10 @@
 //! Contains the code for the stack height limiter instrumentation.
-
 use crate::parser::{
 	copy_locals,
 	translator::{DefaultTranslator, Translator},
 	ModuleInfo,
 };
+use alloc::vec::Vec;
 use anyhow::{anyhow, Result};
 use wasm_encoder::{
 	CodeSection, ConstExpr, Function, GlobalSection, GlobalType, SectionId, ValType,

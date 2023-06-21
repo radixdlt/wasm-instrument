@@ -70,6 +70,7 @@ mod tests {
 				let expected_wat = wasmprinter::print_bytes(expected_bytes).unwrap();
 
 				if actual_wat != expected_wat {
+					#[cfg(features = "std")]
 					for diff in diff::lines(&expected_wat, &actual_wat) {
 						match diff {
 							diff::Result::Left(l) => println!("-{}", l),

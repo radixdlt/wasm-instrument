@@ -5,7 +5,7 @@ use crate::parser::{
 };
 #[cfg(not(features = "std"))]
 use alloc::collections::BTreeMap as Map;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use anyhow::{anyhow, Result};
 #[cfg(features = "std")]
 use std::collections::HashMap as Map;
