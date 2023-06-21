@@ -239,8 +239,8 @@ impl ModuleInfo {
 
 	pub fn resolve_type_idx(&self, t: &Type) -> Option<u32> {
 		for (index, ty) in self.types_map.iter().enumerate() {
-			let Type::Func(ot) = ty;
-			let Type::Func(dt) = t;
+			let Type::Func(ot) = ty else { todo!() };
+			let Type::Func(dt) = t else { todo!() };
 			if ot.eq(dt) {
 				return Some(index as u32);
 			}

@@ -145,7 +145,11 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 
 	// Get a signature and a body of the specified function.
 	let wasmparser::Type::Func(func_signature) =
-		module.get_functype_idx(module.imported_functions_count + func_idx)?;
+		module.get_functype_idx(module.imported_functions_count + func_idx)?
+	else {
+		// TODO: Type::Array(_)
+		todo!("Array type not supported yet");
+	};
 	let body = code_section
 		.into_iter()
 		.nth(func_idx as usize)
@@ -260,7 +264,12 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 				stack.mark_unreachable()?;
 			},
 			Call { function_index } => {
-				let Type::Func(ty) = module.get_functype_idx(function_index)?;
+				let Type::Func(ty) =
+					module.get_functype_idx(function_index)?
+				else {
+					// TODO: Type::Array(_)
+					todo!("Array type not supported yet");
+				};
 
 				// Pop values for arguments of the function.
 				stack.pop_values(ty.params().len() as u32)?;
@@ -273,7 +282,11 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 				let Type::Func(ty) = module
 					.types_map
 					.get(type_index as usize)
-                    .ok_or_else(|| anyhow!("Type not found"))?;
+                    .ok_or_else(|| anyhow!("Type not found"))?
+				else {
+					// TODO: Type::Array(_)
+					todo!("Array type not supported yet");
+				};
 				// Pop the offset into the function table.
 				stack.pop_values(1)?;
 
