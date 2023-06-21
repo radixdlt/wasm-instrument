@@ -26,9 +26,9 @@ struct Thunk {
 	callee_stack_cost: u32,
 }
 
-pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()> {
+pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Result<()> {
 	// First, we need to collect all function indices that should be replaced by thunks
-	let exports = match module.raw_sections.get(&SectionId::Export.into()) {
+	let exports = match module_info.raw_sections.get(&SectionId::Export.into()) {
 		Some(raw_sec) => ExportSectionReader::new(&raw_sec.data, 0)?
 			.into_iter()
 			.collect::<WasmParserResult<Vec<Export>>>()?,
@@ -36,7 +36,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 	};
 
 	//element maybe null
-	let elements = match module.raw_sections.get(&SectionId::Element.into()) {
+	let elements = match module_info.raw_sections.get(&SectionId::Element.into()) {
 		Some(v) => ElementSectionReader::new(&v.data, 0)?
 			.into_iter()
 			.collect::<WasmParserResult<Vec<Element>>>()?,
@@ -72,7 +72,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 
 		for func_idx in exported_func_indices
 			.chain(table_func_indices)
-			.chain(module.start_function.into_iter())
+			.chain(module_info.start_function.into_iter())
 		{
 			let callee_stack_cost =
 				ctx.stack_cost(func_idx).ok_or_else(|| anyhow!("function index isn't found"))?;
@@ -82,7 +82,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 				replacement_map.insert(
 					func_idx,
 					Thunk {
-						signature: match module.get_functype_idx(func_idx)?.clone() {
+						signature: match module_info.get_functype_idx(func_idx)?.clone() {
 							Type::Func(ft) => ft,
 							// TODO: proper handling of Array
 							Type::Array(_) => todo!(),
@@ -101,7 +101,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 
 	// Save current func_idx
 	let mut func_body_sec_builder = CodeSection::new();
-	let func_body_sec_data = &module
+	let func_body_sec_data = &module_info
 		.raw_sections
 		.get(&SectionId::Code.into())
 		.ok_or_else(|| anyhow!("no function body"))?
@@ -113,7 +113,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 	}
 
 	let mut func_sec_builder = FunctionSection::new();
-	let func_sec_data = &module
+	let func_sec_data = &module_info
 		.raw_sections
 		.get(&SectionId::Function.into())
 		.ok_or_else(|| anyhow!("no function section"))? //todo allow empty function file?
@@ -124,7 +124,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 		func_sec_builder.function(func_body?);
 	}
 
-	let mut next_func_idx = module.function_map.len() as u32;
+	let mut next_func_idx = module_info.function_map.len() as u32;
 	for (func_idx, thunk) in replacement_map.iter_mut() {
 		// Thunk body consist of:
 		//  - argument pushing
@@ -148,7 +148,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 		});
 		thunk_body.instruction(&wasm_encoder::Instruction::End);
 
-		let func_type = module
+		let func_type = module_info
 			.resolve_type_idx(&Type::Func(thunk.signature.clone()))
 			.ok_or_else(|| anyhow!("signature not exit"))?; //resolve thunk func type, this signature should exit
 		func_sec_builder.function(func_type); //add thunk function
@@ -224,18 +224,18 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()>
 		});
 	}
 
-	module.replace_section(SectionId::Function.into(), &func_sec_builder)?;
-	module.replace_section(SectionId::Code.into(), &func_body_sec_builder)?;
-	module.replace_section(SectionId::Export.into(), &export_sec_builder)?;
-	module.replace_section(SectionId::Element.into(), &ele_sec_builder)?;
-	if let Some(start_idx) = module.start_function {
+	module_info.replace_section(SectionId::Function.into(), &func_sec_builder)?;
+	module_info.replace_section(SectionId::Code.into(), &func_body_sec_builder)?;
+	module_info.replace_section(SectionId::Export.into(), &export_sec_builder)?;
+	module_info.replace_section(SectionId::Element.into(), &ele_sec_builder)?;
+	if let Some(start_idx) = module_info.start_function {
 		let mut new_func_idx = start_idx;
 		if let Some(thunk) = replacement_map.get(&start_idx) {
 			new_func_idx =
 				thunk.idx.expect("at this point an index must be assigned to each thunk");
 		}
 
-		module.replace_section(
+		module_info.replace_section(
 			SectionId::Start.into(),
 			&wasm_encoder::StartSection { function_index: new_func_idx },
 		)?;
