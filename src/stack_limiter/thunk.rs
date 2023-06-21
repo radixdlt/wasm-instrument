@@ -6,6 +6,7 @@ use crate::parser::{
 #[cfg(not(features = "std"))]
 use alloc::collections::BTreeMap as Map;
 use alloc::vec::Vec;
+use anyhow::{anyhow, Result};
 #[cfg(features = "std")]
 use std::collections::HashMap as Map;
 use wasm_encoder::{
@@ -25,24 +26,20 @@ struct Thunk {
 	callee_stack_cost: u32,
 }
 
-pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(), &'static str> {
+pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()> {
 	// First, we need to collect all function indices that should be replaced by thunks
 	let exports = match module.raw_sections.get(&SectionId::Export.into()) {
-		Some(raw_sec) => ExportSectionReader::new(&raw_sec.data, 0)
-			.map_err(|err| stringify!(err))?
+		Some(raw_sec) => ExportSectionReader::new(&raw_sec.data, 0)?
 			.into_iter()
-			.collect::<WasmParserResult<Vec<Export>>>()
-			.map_err(|err| stringify!(err))?,
+			.collect::<WasmParserResult<Vec<Export>>>()?,
 		None => vec![],
 	};
 
 	//element maybe null
 	let elements = match module.raw_sections.get(&SectionId::Element.into()) {
-		Some(v) => ElementSectionReader::new(&v.data, 0)
-			.map_err(|err| stringify!(err))?
+		Some(v) => ElementSectionReader::new(&v.data, 0)?
 			.into_iter()
-			.collect::<WasmParserResult<Vec<Element>>>()
-			.map_err(|err| stringify!(err))?,
+			.collect::<WasmParserResult<Vec<Element>>>()?,
 		None => vec![],
 	};
 
@@ -56,17 +53,19 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 		for elem in elements.clone() {
 			match elem.items {
 				ElementItems::Functions(func_indexes) => {
-					let segment_func_indices = &func_indexes
+					for i in func_indexes.into_iter() {}
+
+					let segment_func_indices: Vec<u32> = func_indexes
 						.into_iter()
 						.map(|item| match item {
-							Ok(idx) => Ok(idx),
-							Err(err) => Err(stringify!(err)),
+							Ok(val) => Ok(val),
+							Err(err) => Err(anyhow!(err)),
 						})
-						.collect::<Result<Vec<u32>, &'static str>>()?;
+						.collect::<anyhow::Result<Vec<u32>>>()?;
 
-					table_func_indices.extend_from_slice(segment_func_indices);
+					table_func_indices.extend_from_slice(&segment_func_indices);
 				},
-				ElementItems::Expressions(_) => return Err("never exec here"),
+				ElementItems::Expressions(_) => return Err(anyhow!("never exec here")),
 			}
 		}
 
@@ -77,9 +76,8 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 			.chain(table_func_indices)
 			.chain(module.start_function.into_iter())
 		{
-			let callee_stack_cost = ctx
-				.stack_cost(func_idx)
-				.ok_or_else(|| stringify!("function index isn't found"))?;
+			let callee_stack_cost =
+				ctx.stack_cost(func_idx).ok_or_else(|| anyhow!("function index isn't found"))?;
 
 			// Don't generate a thunk if stack_cost of a callee is zero.
 			if callee_stack_cost != 0 {
@@ -88,6 +86,8 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 					Thunk {
 						signature: match module.get_functype_idx(func_idx)?.clone() {
 							Type::Func(ft) => ft,
+							// TODO: proper handling of Array
+							Type::Array(at) => todo!(),
 						},
 						idx: None,
 						callee_stack_cost,
@@ -106,30 +106,24 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 	let func_body_sec_data = &module
 		.raw_sections
 		.get(&SectionId::Code.into())
-		.ok_or_else(|| stringify!("no function body"))?
+		.ok_or_else(|| anyhow!("no function body"))?
 		.data;
 
-	let code_sec_reader =
-		CodeSectionReader::new(func_body_sec_data, 0).map_err(|err| stringify!(err))?;
+	let code_sec_reader = CodeSectionReader::new(func_body_sec_data, 0)?;
 	for func_body in code_sec_reader {
-		let func_body = func_body.map_err(|err| stringify!(err))?;
-		DefaultTranslator
-			.translate_code(func_body, &mut func_body_sec_builder)
-			.map_err(|err| stringify!(err))?;
+		DefaultTranslator.translate_code(func_body?, &mut func_body_sec_builder)?;
 	}
 
 	let mut func_sec_builder = FunctionSection::new();
 	let func_sec_data = &module
 		.raw_sections
 		.get(&SectionId::Function.into())
-		.ok_or_else(|| stringify!("no function section"))? //todo allow empty function file?
+		.ok_or_else(|| anyhow!("no function section"))? //todo allow empty function file?
 		.data;
 
-	let func_sec_reader =
-		FunctionSectionReader::new(func_sec_data, 0).map_err(|err| stringify!(err))?;
+	let func_sec_reader = FunctionSectionReader::new(func_sec_data, 0)?;
 	for func_body in func_sec_reader {
-		let func_body = func_body.map_err(|err| stringify!(err))?;
-		func_sec_builder.function(func_body);
+		func_sec_builder.function(func_body?);
 	}
 
 	let mut next_func_idx = module.function_map.len() as u32;
@@ -158,7 +152,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 
 		let func_type = module
 			.resolve_type_idx(&Type::Func(thunk.signature.clone()))
-			.ok_or_else(|| stringify!("signature not exit"))?; //resolve thunk func type, this signature should exit
+			.ok_or_else(|| anyhow!("signature not exit"))?; //resolve thunk func type, this signature should exit
 		func_sec_builder.function(func_type); //add thunk function
 		func_body_sec_builder.function(&thunk_body); //add thunk body
 
@@ -180,9 +174,7 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 		}
 		export_sec_builder.export(
 			export.name,
-			DefaultTranslator
-				.translate_export_kind(export.kind)
-				.map_err(|err| stringify!(err))?,
+			DefaultTranslator.translate_export_kind(export.kind)?,
 			function_idx,
 		);
 	}
@@ -193,17 +185,17 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 		match elem.items {
 			ElementItems::Functions(func_indexes) => {
 				for item in func_indexes.into_iter() {
-					let func_idx = item.map_err(|err| stringify!(err))?;
+					let func_idx = item.map_err(|err| anyhow!(err))?;
 
 					if let Some(thunk) = replacement_map.get(&func_idx) {
 						let new_func_idx = thunk.idx.ok_or_else(|| {
-							stringify!("at this point an index must be assigned to each thunk")
+							anyhow!("at this point an index must be assigned to each thunk")
 						})?; //resolve thunk func type, this signature should exit
 						functions.push(new_func_idx);
 					}
 				}
 			},
-			ElementItems::Expressions(_) => return Err("element must be func here"),
+			ElementItems::Expressions(_) => return Err(anyhow!("element must be func here")),
 		}
 
 		//todo edit element is little complex,
@@ -215,15 +207,14 @@ pub fn generate_thunks(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(),
 						&wasmparser::ValType::I32,
 						ConstExprKind::ElementOffset,
 					)
-					.map_err(|err| stringify!(err))?;
-				ElementMode::Active { table: Some(table_index), offset: &offset }
+					.map_err(|err| anyhow!(err))?;
+				ElementMode::Active { table: table_index, offset: &offset }
 			},
 			ElementKind::Passive => ElementMode::Passive,
 			ElementKind::Declared => ElementMode::Declared,
 		};
 
-		let element_type =
-			DefaultTranslator.translate_ty(&elem.ty).map_err(|err| stringify!(err))?;
+		let element_type = DefaultTranslator.translate_refty(&elem.ty)?;
 		let elements = Elements::Functions(&functions);
 
 		ele_sec_builder.segment(ElementSegment {

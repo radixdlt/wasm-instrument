@@ -5,6 +5,7 @@ use crate::parser::{
 	translator::{DefaultTranslator, Translator},
 	ModuleInfo,
 };
+use anyhow::{anyhow, Result};
 use wasm_encoder::{
 	CodeSection, ConstExpr, Function, GlobalSection, GlobalType, SectionId, ValType,
 };
@@ -114,25 +115,25 @@ impl Context {
 /// - arguments pushed by the caller are copied into callee stack rather than shared between the
 ///   frames.
 /// - upon entry into the function entire stack frame is allocated.
-pub fn inject(module: &mut ModuleInfo, stack_limit: u32) -> Result<Vec<u8>, &'static str> {
+pub fn inject(module_info: &mut ModuleInfo, stack_limit: u32) -> Result<Vec<u8>> {
 	let mut ctx = Context {
-		stack_height_global_idx: generate_stack_height_global(module)?,
-		func_stack_costs: compute_stack_costs(module)?,
+		stack_height_global_idx: generate_stack_height_global(module_info)?,
+		func_stack_costs: compute_stack_costs(module_info)?,
 		stack_limit,
 	};
 
-	instrument_functions(&mut ctx, &mut module)?;
-	let module = thunk::generate_thunks(&mut ctx, module)?;
+	instrument_functions(&mut ctx, &mut module_info)?;
+	thunk::generate_thunks(&mut ctx, module_info)?;
 
-	Ok(module)
+	Ok(module_info.bytes())
 }
 
 /// Generate a new global that will be used for tracking current stack height.
-fn generate_stack_height_global(module: &mut ModuleInfo) -> Result<u32, &'static str> {
+fn generate_stack_height_global(module: &mut ModuleInfo) -> Result<u32> {
 	let mut global_sec_builder = GlobalSection::new();
 	let index = if let Some(global_sec) = &module.raw_sections.get(&SectionId::Global.into()) {
 		let reader = GlobalSectionReader::new(&global_sec.data, 0)?;
-		let count = reader.get_count();
+		let count = reader.count();
 		for global in reader {
 			DefaultTranslator.translate_global(global?, &mut global_sec_builder)?;
 		}
@@ -150,7 +151,7 @@ fn generate_stack_height_global(module: &mut ModuleInfo) -> Result<u32, &'static
 /// Calculate stack costs for all functions.
 ///
 /// Returns a vector with a stack cost for each function, including imports.
-fn compute_stack_costs(module: &mut ModuleInfo) -> Result<Vec<u32>, &'static str> {
+fn compute_stack_costs(module: &mut ModuleInfo) -> Result<Vec<u32>> {
 	let func_imports = module.num_imported_functions();
 
 	// TODO: optimize!
@@ -169,19 +170,19 @@ fn compute_stack_costs(module: &mut ModuleInfo) -> Result<Vec<u32>, &'static str
 /// Stack cost of the given *defined* function is the sum of it's locals count (that is,
 /// number of arguments plus number of local variables) and the maximal stack
 /// height.
-fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32, &'static str> {
+fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32> {
 	// To calculate the cost of a function we need to convert index from
 	// function index space to defined function spaces.
 	let func_imports = module.num_imported_functions();
 	let defined_func_idx = func_idx
 		.checked_sub(func_imports)
-		.ok_or_else(|| stringify!("this should be a index of a defined function"))?;
+		.ok_or_else(|| anyhow!("this should be a index of a defined function"))?;
 
 	let code_section_reader = CodeSectionReader::new(
 		&module
 			.raw_sections
 			.get(&SectionId::Code.into())
-			.ok_or_else(|| stringify!("not find code section"))?
+			.ok_or_else(|| anyhow!("not find code section"))?
 			.data,
 		0,
 	)?;
@@ -190,7 +191,7 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32, &'s
 		.into_iter()
 		.collect::<wasmparser::Result<Vec<FunctionBody>>>()?
 		.get(defined_func_idx as usize)
-		.ok_or_else(|| stringify!("function body is out of bounds"))?
+		.ok_or_else(|| anyhow!("function body is out of bounds"))?
 		.get_locals_reader()?;
 
 	let locals_count: u32 = local_reader.get_count();
@@ -198,17 +199,15 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32, &'s
 
 	locals_count
 		.checked_add(max_stack_height)
-		.ok_or_else(|| stringify!("overflow in adding locals_count and max_stack_height"))
+		.ok_or_else(|| anyhow!("overflow in adding locals_count and max_stack_height"))
 }
 
-fn instrument_functions(ctx: &mut Context, module: &mut ModuleInfo) -> Result<(), &'static str> {
+fn instrument_functions(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()> {
 	let mut code_builder = CodeSection::new();
 	if let Some(code_sec) = module.raw_sections.get(&SectionId::Code.into()) {
-		let function_sec_reader =
-			CodeSectionReader::new(&code_sec.data, 0).map_err(|err| stringify!(err))?;
+		let function_sec_reader = CodeSectionReader::new(&code_sec.data, 0)?;
 		for body in function_sec_reader {
-			let body = body.map_err(|err| stringify!(err))?;
-			let body_encoder = instrument_function(ctx, body)?;
+			let body_encoder = instrument_function(ctx, body?)?;
 			code_builder.function(&body_encoder);
 		}
 	}
@@ -241,7 +240,7 @@ fn instrument_functions(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()
 ///
 /// drop
 /// ```
-fn instrument_function(ctx: &mut Context, func: FunctionBody) -> Result<Function, &'static str> {
+fn instrument_function(ctx: &mut Context, func: FunctionBody) -> Result<Function> {
 	struct InstrumentCall {
 		offset: usize,
 		callee: u32,
@@ -302,7 +301,7 @@ fn instrument_function(ctx: &mut Context, func: FunctionBody) -> Result<Function
 	}
 
 	if call_peeker.next().is_some() {
-		return Err(stringify!("not all calls were used"));
+		return Err(anyhow!("not all calls were used"));
 	}
 
 	Ok(func_code_builder)

@@ -1,6 +1,7 @@
-use crate::parser::ModuleInfo;
-
 use alloc::vec::Vec;
+
+use crate::parser::ModuleInfo;
+use anyhow::{anyhow, Result};
 use wasm_encoder::SectionId;
 use wasmparser::{BlockType, CodeSectionReader, Type};
 
@@ -51,18 +52,25 @@ impl Stack {
 
 	/// Returns a reference to a frame by specified depth relative to the top of
 	/// control stack.
-	fn frame(&self, rel_depth: u32) -> Result<&Frame, &'static str> {
+	fn frame(&self, rel_depth: u32) -> Result<&Frame> {
 		let control_stack_height: usize = self.control_stack.len();
-		let last_idx = control_stack_height.checked_sub(1).ok_or("control stack is empty")?;
-		let idx = last_idx.checked_sub(rel_depth as usize).ok_or("control stack out-of-bounds")?;
+		let last_idx = control_stack_height
+			.checked_sub(1)
+			.ok_or_else(|| anyhow!("control stack is empty"))?;
+		let idx = last_idx
+			.checked_sub(rel_depth as usize)
+			.ok_or_else(|| anyhow!("control stack out-of-bounds"))?;
 		Ok(&self.control_stack[idx])
 	}
 
 	/// Mark successive instructions as unreachable.
 	///
 	/// This effectively makes stack polymorphic.
-	fn mark_unreachable(&mut self) -> Result<(), &'static str> {
-		let top_frame = self.control_stack.last_mut().ok_or("stack must be non-empty")?;
+	fn mark_unreachable(&mut self) -> Result<()> {
+		let top_frame = self
+			.control_stack
+			.last_mut()
+			.ok_or_else(|| anyhow!("stack must be non-empty"))?;
 		top_frame.is_polymorphic = true;
 		Ok(())
 	}
@@ -75,8 +83,8 @@ impl Stack {
 	/// Pop control frame from the control stack.
 	///
 	/// Returns `Err` if the control stack is empty.
-	fn pop_frame(&mut self) -> Result<Frame, &'static str> {
-		self.control_stack.pop().ok_or("stack must be non-empty")
+	fn pop_frame(&mut self) -> Result<Frame> {
+		self.control_stack.pop().ok_or_else(|| anyhow!("stack must be non-empty"))
 	}
 
 	/// Truncate the height of value stack to the specified height.
@@ -87,8 +95,9 @@ impl Stack {
 	/// Push specified number of values into the value stack.
 	///
 	/// Returns `Err` if the height overflow usize value.
-	fn push_values(&mut self, value_count: u32) -> Result<(), &'static str> {
-		self.height = self.height.checked_add(value_count).ok_or("stack overflow")?;
+	fn push_values(&mut self, value_count: u32) -> Result<()> {
+		self.height =
+			self.height.checked_add(value_count).ok_or_else(|| anyhow!("stack overflow"))?;
 		Ok(())
 	}
 
@@ -96,7 +105,7 @@ impl Stack {
 	///
 	/// Returns `Err` if the stack happen to be negative value after
 	/// values popped.
-	fn pop_values(&mut self, value_count: u32) -> Result<(), &'static str> {
+	fn pop_values(&mut self, value_count: u32) -> Result<()> {
 		if value_count == 0 {
 			return Ok(());
 		}
@@ -109,43 +118,39 @@ impl Stack {
 				return if top_frame.is_polymorphic {
 					Ok(())
 				} else {
-					return Err("trying to pop more values than pushed");
+					return Err(anyhow!("trying to pop more values than pushed"));
 				};
 			}
 		}
 
-		self.height = self.height.checked_sub(value_count).ok_or("stack underflow")?;
+		self.height =
+			self.height.checked_sub(value_count).ok_or_else(|| anyhow!("stack underflow"))?;
 
 		Ok(())
 	}
 }
 
 /// This function expects the function to be validated.
-pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> {
+pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 	use wasmparser::Operator::*;
 
 	let code_section = CodeSectionReader::new(
 		&module
 			.raw_sections
 			.get(&SectionId::Code.into())
-			.ok_or_else(|| "no code section")?
+			.ok_or_else(|| anyhow!("no code section"))?
 			.data,
 		0,
-	)
-	.map_err(|err| stringify!(err))?;
+	)?;
 
 	// Get a signature and a body of the specified function.
 	let wasmparser::Type::Func(func_signature) =
 		module.get_functype_idx(module.imported_functions_count + func_idx)?;
-	let body = match code_section.into_iter().nth(func_idx as usize) {
-		Some(item) => match item {
-			Ok(body) => body,
-			Err(err) => return Err(stringify!(err)),
-		},
-		None => return Err("function body for the index isn't found"),
-	};
-	let mut body_reader = body.get_operators_reader().map_err(|err| stringify!(err))?;
-
+	let body = code_section
+		.into_iter()
+		.nth(func_idx as usize)
+		.ok_or_else(|| anyhow!("function body for the index isn't found"))??;
+	let mut body_reader = body.get_operators_reader()?;
 	let mut stack = Stack::new();
 	let mut max_height: u32 = 0;
 
@@ -160,7 +165,7 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> 
 	});
 
 	while !body_reader.eof() {
-		let opcode = body_reader.read().map_err(|err| stringify!())?;
+		let opcode = body_reader.read()?;
 		// If current value stack is higher than maximal height observed so far,
 		// save the new height.
 		// However, we don't increase maximal value in unreachable code.
@@ -168,6 +173,18 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> 
 			max_height = stack.height();
 		}
 		match opcode {
+			// TODO: handle properly below enums
+			I31New
+			| I31GetS
+			| I31GetU
+			| MemoryDiscard { .. }
+			| CallRef { .. }
+			| I8x16AvgrU
+			| I16x8AvgrU
+			| ReturnCallRef { .. }
+			| RefAsNonNull
+			| BrOnNull { .. }
+			| BrOnNonNull { .. } => todo!(),
 			Nop => {},
 			Block { blockty }
 			| Loop { blockty }
@@ -222,10 +239,9 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> 
 
 				// Check that all jump targets have an equal arities.
 				for target in targets.targets() {
-					let target = target.map_err(|err|stringify!(err))?;
-					let arity = stack.frame(target)?.branch_arity;
+                    let arity = stack.frame(target?)?.branch_arity;
 					if arity != arity_of_default {
-						return Err(stringify!("arity of all jump-targets must be equal"));
+                        return Err(anyhow!("arity of all jump-targets must be equal"));
 					}
 				}
 
@@ -257,7 +273,7 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> 
 				let Type::Func(ty) = module
 					.types_map
 					.get(type_index as usize)
-					.ok_or_else(|| stringify!("Type not found"))?;
+                    .ok_or_else(|| anyhow!("Type not found"))?;
 				// Pop the offset into the function table.
 				stack.pop_values(1)?;
 
@@ -432,12 +448,12 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> 
 			| Rethrow { .. }
 			| Delegate { .. }
 			| CatchAll { .. } => {
-				return Err(stringify!("exception instructions are not supported"));
+                return Err(anyhow!("exception instructions are not supported"));
 			},
 
 			// Reference types instructions
 			TypedSelect { .. } | RefNull { .. } | RefIsNull { .. } | RefFunc { .. } => {
-				return Err(stringify!("exception instructions are not supported"));
+                return Err(anyhow!("exception instructions are not supported"));
 			},
 
 			// SIMD instructions
@@ -678,14 +694,14 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> 
 			| F32x4DemoteF64x2Zero { .. }
 			| F64x2PromoteLowF32x4 { .. }
 			| I8x16RelaxedSwizzle { .. }
-			| I32x4RelaxedTruncSatF32x4S { .. }
-			| I32x4RelaxedTruncSatF32x4U { .. }
-			| I32x4RelaxedTruncSatF64x2SZero { .. }
-			| I32x4RelaxedTruncSatF64x2UZero { .. }
-			| F32x4RelaxedFma { .. }
-			| F32x4RelaxedFnma { .. }
-			| F64x2RelaxedFma { .. }
-			| F64x2RelaxedFnma { .. }
+			| I32x4RelaxedTruncF32x4S { .. }
+			| I32x4RelaxedTruncF32x4U { .. }
+			| I32x4RelaxedTruncF64x2SZero { .. }
+			| I32x4RelaxedTruncF64x2UZero { .. }
+			| F32x4RelaxedMadd { .. }
+			| F32x4RelaxedNmadd { .. }
+			| F64x2RelaxedMadd { .. }
+			| F64x2RelaxedNmadd { .. }
 			| I8x16RelaxedLaneselect { .. }
 			| I16x8RelaxedLaneselect { .. }
 			| I32x4RelaxedLaneselect { .. }
@@ -695,10 +711,11 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> 
 			| F64x2RelaxedMin { .. }
 			| F64x2RelaxedMax { .. }
 			| I16x8RelaxedQ15mulrS { .. }
-			| I16x8DotI8x16I7x16S { .. }
-			| I32x4DotI8x16I7x16AddS { .. }
-			| F32x4RelaxedDotBf16x8AddF32x4 { .. } => {
-				return Err(stringify!("simd instructions are not supported"))
+			| I16x8RelaxedDotI8x16I7x16S { .. }
+			// TODO find below instruction
+			//| F32x4RelaxedDotBf16x8AddF32x4 { .. }
+			| I32x4RelaxedDotI8x16I7x16AddS { .. } => {
+                return Err(anyhow!("simd instructions are not supported"))
 			},
 
 			// Atomic instructions
@@ -768,11 +785,12 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32, &'static str> 
 			| I64AtomicRmw8CmpxchgU { .. }
 			| I64AtomicRmw16CmpxchgU { .. }
 			| AtomicFence { .. }
-			| I64AtomicRmw32CmpxchgU { .. } => return Err(stringify!("atomic instructions are not supported")),
-
+			| I64AtomicRmw32CmpxchgU { .. } => {
+                return Err(anyhow!("atomic instructions are not supported"))
+			}
 			// Tail-call instructions
 			ReturnCall { .. } | ReturnCallIndirect { .. } => {
-				return Err(stringify!("exception instructions are not supported"));
+                return Err(anyhow!("exception instructions are not supported"));
 			},
 		}
 	}
