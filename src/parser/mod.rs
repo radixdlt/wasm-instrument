@@ -7,7 +7,10 @@ use std::{
 };
 
 use wasm_encoder::{Encode, SectionId};
-use wasmparser::{Chunk, ExternalKind, GlobalType, MemoryType, Parser, Payload, TableType, Type};
+use wasmparser::{
+	Chunk, Export, ExportSectionReader, ExternalKind, Global, GlobalSectionReader, GlobalType,
+	MemoryType, Parser, Payload, Result as WasmParserResult, TableType, Type,
+};
 
 #[derive(Clone, Debug)]
 pub struct RawSection {
@@ -403,6 +406,28 @@ impl ModuleInfo {
 	#[allow(dead_code)]
 	pub fn num_export_global(&self) -> u32 {
 		self.exports_global_count
+	}
+
+	#[allow(dead_code)]
+	pub fn export_section(&self) -> Result<Vec<Export>> {
+		let export = match self.raw_sections.get(&SectionId::Export.into()) {
+			Some(raw_sec) => ExportSectionReader::new(&raw_sec.data, 0)?
+				.into_iter()
+				.collect::<WasmParserResult<Vec<Export>>>()?,
+			None => vec![],
+		};
+		Ok(export)
+	}
+
+	#[allow(dead_code)]
+	pub fn global_section(&self) -> Result<Vec<Global>> {
+		let global = match self.raw_sections.get(&SectionId::Global.into()) {
+			Some(raw_sec) => GlobalSectionReader::new(&raw_sec.data, 0)?
+				.into_iter()
+				.collect::<WasmParserResult<Vec<Global>>>()?,
+			None => vec![],
+		};
+		Ok(global)
 	}
 }
 

@@ -1,13 +1,16 @@
+use crate::parser::{
+	translator::{ConstExprKind, DefaultTranslator, Translator},
+	ModuleInfo,
+};
 use alloc::{format, vec::Vec};
-use parity_wasm::elements;
 
 /// Export all declared mutable globals as `prefix_index`.
 ///
 /// This will export all internal mutable globals under the name of
 /// concat(`prefix`, `"_"`, `i`) where i is the index inside the range of
 /// [0..total number of internal mutable globals].
-pub fn export_mutable_globals(module: &mut elements::Module, prefix: &str) {
-	let exports = global_section(module)
+pub fn export_mutable_globals(module_info: &mut ModuleInfo, prefix: &str) {
+	let exports = global_section(module_info)
 		.map(|section| {
 			section
 				.entries()
@@ -26,8 +29,8 @@ pub fn export_mutable_globals(module: &mut elements::Module, prefix: &str) {
 		})
 		.unwrap_or_default();
 
-	if module.export_section().is_none() {
-		module
+	if module_info.export_section().is_ok() {
+		module_info
 			.sections_mut()
 			.push(elements::Section::Export(elements::ExportSection::default()));
 	}
@@ -36,10 +39,10 @@ pub fn export_mutable_globals(module: &mut elements::Module, prefix: &str) {
 		let new_entry = elements::ExportEntry::new(
 			format!("{}_{}", prefix, symbol_index),
 			elements::Internal::Global(
-				(module.import_count(elements::ImportCountType::Global) + export) as _,
+				(module_info.import_count(elements::ImportCountType::Global) + export) as _,
 			),
 		);
-		export_section(module)
+		export_section(module_info)
 			.expect("added above if does not exists")
 			.entries_mut()
 			.push(new_entry);
@@ -49,7 +52,7 @@ pub fn export_mutable_globals(module: &mut elements::Module, prefix: &str) {
 fn export_section(module: &mut elements::Module) -> Option<&mut elements::ExportSection> {
 	for section in module.sections_mut() {
 		if let elements::Section::Export(sect) = section {
-			return Some(sect)
+			return Some(sect);
 		}
 	}
 	None
@@ -58,7 +61,7 @@ fn export_section(module: &mut elements::Module) -> Option<&mut elements::Export
 fn global_section(module: &mut elements::Module) -> Option<&mut elements::GlobalSection> {
 	for section in module.sections_mut() {
 		if let elements::Section::Global(sect) = section {
-			return Some(sect)
+			return Some(sect);
 		}
 	}
 	None
