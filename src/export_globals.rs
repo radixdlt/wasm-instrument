@@ -1,8 +1,9 @@
 use crate::parser::{
-	translator::{ConstExprKind, DefaultTranslator, Translator},
+	translator::{DefaultTranslator, Translator},
 	ModuleInfo,
 };
 use alloc::{format, vec::Vec};
+use wasm_encoder::{ExportKind, ExportSection, SectionId};
 
 /// Export all declared mutable globals as `prefix_index`.
 ///
@@ -10,73 +11,47 @@ use alloc::{format, vec::Vec};
 /// concat(`prefix`, `"_"`, `i`) where i is the index inside the range of
 /// [0..total number of internal mutable globals].
 pub fn export_mutable_globals(module_info: &mut ModuleInfo, prefix: &str) {
-	let exports = global_section(module_info)
-		.map(|section| {
-			section
-				.entries()
-				.iter()
-				.enumerate()
-				.filter_map(
-					|(index, global)| {
-						if global.global_type().is_mutable() {
-							Some(index)
-						} else {
-							None
-						}
-					},
-				)
-				.collect::<Vec<_>>()
-		})
-		.unwrap_or_default();
+	let mutable_globals_to_export = module_info
+		.global_section()
+		.unwrap()
+		.into_iter()
+		.enumerate()
+		.filter_map(|(index, global)| if global.ty.mutable { Some(index as u32) } else { None })
+		.collect::<Vec<u32>>();
 
-	if module_info.export_section().is_ok() {
-		module_info
-			.sections_mut()
-			.push(elements::Section::Export(elements::ExportSection::default()));
+	let exports = module_info.export_section().unwrap();
+
+	let mut export_sec_builder = ExportSection::new();
+
+	// Recreate current export section
+	for export in exports {
+		let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
+		export_sec_builder.export(export.name, export_kind, export.index);
 	}
 
-	for (symbol_index, export) in exports.into_iter().enumerate() {
-		let new_entry = elements::ExportEntry::new(
-			format!("{}_{}", prefix, symbol_index),
-			elements::Internal::Global(
-				(module_info.import_count(elements::ImportCountType::Global) + export) as _,
-			),
+	// Add mutable globals to the export section
+	for (symbol_index, export) in mutable_globals_to_export.into_iter().enumerate() {
+		let name = format!("{}_{}", prefix, symbol_index);
+		export_sec_builder.export(
+			&name,
+			ExportKind::Global,
+			module_info.imported_globals_count + export,
 		);
-		export_section(module_info)
-			.expect("added above if does not exists")
-			.entries_mut()
-			.push(new_entry);
 	}
-}
 
-fn export_section(module: &mut elements::Module) -> Option<&mut elements::ExportSection> {
-	for section in module.sections_mut() {
-		if let elements::Section::Export(sect) = section {
-			return Some(sect);
-		}
-	}
-	None
-}
-
-fn global_section(module: &mut elements::Module) -> Option<&mut elements::GlobalSection> {
-	for section in module.sections_mut() {
-		if let elements::Section::Global(sect) = section {
-			return Some(sect);
-		}
-	}
-	None
+	module_info
+		.replace_section(SectionId::Export.into(), &export_sec_builder)
+		.unwrap();
 }
 
 #[cfg(test)]
 mod tests {
-
 	use super::export_mutable_globals;
-	use parity_wasm::elements;
+	use crate::parser::ModuleInfo;
 
-	fn parse_wat(source: &str) -> elements::Module {
+	fn parse_wat(source: &str) -> ModuleInfo {
 		let module_bytes = wat::parse_str(source).unwrap();
-		wasmparser::validate(&module_bytes).unwrap();
-		elements::deserialize_buffer(module_bytes.as_ref()).expect("failed to parse module")
+		ModuleInfo::new(&module_bytes).expect("failed to parse module")
 	}
 
 	macro_rules! test_export_global {
@@ -88,11 +63,8 @@ mod tests {
 
 				export_mutable_globals(&mut input_module, "exported_internal_global");
 
-				let actual_bytes = elements::serialize(input_module)
-					.expect("injected module must have a function body");
-
-				let expected_bytes = elements::serialize(expected_module)
-					.expect("injected module must have a function body");
+				let actual_bytes = input_module.bytes();
+				let expected_bytes = expected_module.bytes();
 
 				let actual_wat = wasmprinter::print_bytes(actual_bytes).unwrap();
 				let expected_wat = wasmprinter::print_bytes(expected_bytes).unwrap();
