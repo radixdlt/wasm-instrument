@@ -1,6 +1,6 @@
-use anyhow::{Error, Result};
+use anyhow::{anyhow, Result};
 use wasm_encoder::*;
-use wasmparser::{DataKind, ElementKind, FunctionBody, Global, Operator, Type};
+use wasmparser::{DataKind, ElementKind, ExternalKind, FunctionBody, Global, Operator, Type};
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub enum Item {
@@ -69,6 +69,21 @@ pub trait Translator {
 
 	fn translate_global(&mut self, g: Global, s: &mut GlobalSection) -> Result<()> {
 		global(self.as_obj(), g, s)
+	}
+
+	fn translate_export_kind(
+		&self,
+		g: wasmparser::ExternalKind,
+	) -> Result<wasm_encoder::ExportKind> {
+		export_kind(self.as_obj(), g)
+	}
+
+	fn translate_export(
+		&self,
+		e: &wasmparser::Export,
+		sec: &mut wasm_encoder::ExportSection,
+	) -> Result<()> {
+		export(self.as_obj(), e, sec)
 	}
 
 	fn translate_const_expr(
@@ -216,6 +231,26 @@ pub fn global(t: &mut dyn Translator, global: Global, s: &mut GlobalSection) -> 
 	Ok(())
 }
 
+pub fn export_kind(_: &dyn Translator, kind: ExternalKind) -> Result<ExportKind> {
+	match kind {
+		ExternalKind::Table => Ok(ExportKind::Table),
+		ExternalKind::Global => Ok(ExportKind::Global),
+		ExternalKind::Tag => Ok(ExportKind::Tag),
+		ExternalKind::Func => Ok(ExportKind::Func),
+		ExternalKind::Memory => Ok(ExportKind::Memory),
+	}
+}
+
+#[allow(unused)]
+pub fn export(
+	t: &dyn Translator,
+	e: &wasmparser::Export<'_>,
+	sec: &mut wasm_encoder::ExportSection,
+) -> Result<()> {
+	sec.export(e.name, t.translate_export_kind(e.kind)?, e.index);
+	Ok(())
+}
+
 pub fn const_expr(
 	t: &mut dyn Translator,
 	e: &wasmparser::ConstExpr<'_>,
@@ -229,13 +264,13 @@ pub fn const_expr(
 			Operator::RefFunc { .. }
 			| Operator::RefNull { hty: wasmparser::HeapType::Func, .. }
 			| Operator::GlobalGet { .. } => {},
-			_ => return Err(Error::no_mutations_applicable()),
+			_ => return Err(anyhow!("no_mutations_applicable")),
 		}
 	}
 	t.translate_op(&op)?.encode(&mut offset_bytes);
 	match e.read()? {
 		Operator::End if e.eof() => {},
-		_ => return Err(Error::no_mutations_applicable()),
+		_ => return Err(anyhow!("no_mutations_applicable")),
 	}
 	Ok(wasm_encoder::ConstExpr::raw(offset_bytes))
 }
