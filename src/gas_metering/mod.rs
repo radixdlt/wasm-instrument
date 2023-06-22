@@ -219,7 +219,8 @@ pub fn inject<R: Rules, B: Backend>(
 		},
 	};
 
-	let grow_cnt_func = total_func + 1;
+	// TODO: what should be the proper value?
+	let grow_cnt_func = total_func;
 	let mut need_grow_counter = false;
 	let mut error = false;
 
@@ -246,9 +247,9 @@ pub fn inject<R: Rules, B: Backend>(
 					if let Operator::Call { function_index } = op {
 						if function_index >= gas_func_idx {
 							func_builder.instruction(&Instruction::Call(function_index + 1));
-						} else {
-							func_builder.instruction(&DefaultTranslator.translate_op(&op)?);
 						}
+					} else {
+						func_builder.instruction(&DefaultTranslator.translate_op(&op)?);
 					}
 				}
 			}
@@ -775,6 +776,7 @@ fn insert_metering_calls(
 	gas_func: u32,
 ) -> Result<wasm_encoder::Function> {
 	let mut new_func = wasm_encoder::Function::new(copy_locals(func_body)?);
+
 	// To do this in linear time, construct a new vector of instructions, copying over old
 	// instructions one by one and injecting new ones as required.
 	let mut block_iter = blocks.into_iter().peekable();
@@ -812,14 +814,13 @@ fn insert_metering_calls(
 	if block_iter.next().is_some() {
 		return Err(anyhow!("block should be consume all"));
 	}
-
 	Ok(new_func)
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use wasm_encoder::{Encode, Instruction::*};
+	use wasm_encoder::{BlockType, Encode, Instruction::*};
 	use wasmparser::FunctionBody;
 
 	fn check_expect_function_body(
@@ -841,11 +842,9 @@ mod tests {
 			.collect::<wasmparser::Result<Vec<FunctionBody>>>()
 			.unwrap();
 
-		println!("func_bodies = {:?}", func_bodies);
-
 		let func_body = func_bodies
 			.get(index)
-			.unwrap_or_else(|| panic!("module don't have function {}body", index));
+			.unwrap_or_else(|| panic!("module doesn't have function {} body", index));
 
 		let list = func_body
 			.get_operators_reader()
@@ -853,8 +852,6 @@ mod tests {
 			.into_iter()
 			.map(|op| DefaultTranslator.translate_op(&op.unwrap()).unwrap())
 			.collect::<Vec<Instruction>>();
-
-		println!("list = {:?}", list);
 
 		let start = func_body.get_operators_reader().unwrap().original_position();
 		func_sec.data[start..func_body.range().end].to_vec()
@@ -877,32 +874,17 @@ mod tests {
 			)"#,
 		);
 
-		let input_wat = wasmprinter::print_bytes(module.bytes()).unwrap();
-		println!("input_wat = {}", input_wat);
-
 		let backend = host_function::Injector::new("env", "gas");
 		let injected_raw_wasm =
 			super::inject(&mut module, backend, &ConstantCostRules::new(1, 10_000, 1)).unwrap();
 
-		let wat = wasmprinter::print_bytes(&injected_raw_wasm).unwrap();
-		println!("current_wat = {}", wat);
-
+		// main function
 		assert!(check_expect_function_body(
 			&injected_raw_wasm,
 			0,
-			&[I64Const(2), Call(0), GlobalGet(0), Call(0), End,]
+			&[I64Const(2), Call(0), GlobalGet(0), Call(2), End,]
 		));
-		/*
-		assert!(
-			get_function_body(&mut module, 0).unwrap(),
-			&vec![
-				Operator::I64Const { value: 2 },
-				Operator::Call { function_index: 0 },
-				Operator::GlobalGet { global_index: 0 },
-				Operator::Call { function_index: 0 },
-				Operator::End
-			][..]
-		);*/
+		// grow counter
 		assert!(check_expect_function_body(
 			&injected_raw_wasm,
 			1,
@@ -911,206 +893,180 @@ mod tests {
 				LocalGet(0),
 				I64ExtendI32U,
 				I64Const(10000),
+				I64Mul,
 				Call(0),
 				MemoryGrow(0),
 				End,
 			]
 		));
-		/*
-		assert!(
-			get_function_body(&injected_module, 1).unwrap(),
-			&vec![
-				GetLocal(0),
-				GetLocal(0),
-				I64ExtendUI32,
-				I64Const(10000),
-				I64Mul,
-				Call(0),
-				GrowMemory(0),
-				End,
-			][..]
-		);
-		*/
 
-		//let binary = serialize(injected_module).expect("serialization failed");
-		//wasmparser::validate(&binary).unwrap();
+		wasmparser::validate(&injected_raw_wasm).unwrap();
 	}
-	/*
-		#[test]
-		fn simple_grow_mut_global() {
-			let module = parse_wat(
-				r#"(module
+
+	#[test]
+	fn simple_grow_mut_global() {
+		let mut module = parse_wat(
+			r#"(module
 				(func (result i32)
 				  global.get 0
 				  memory.grow)
 				(global i32 (i32.const 42))
 				(memory 0 1)
 				)"#,
-			);
-			let backend = mutable_global::Injector::new("env", "gas_left");
-			let injected_module =
-				super::inject(module, backend, &ConstantCostRules::new(1, 10_000, 1)).unwrap();
+		);
 
-			assert_eq!(
-				get_function_body(&injected_module, 0).unwrap(),
-				&vec![I64Const(13), Call(1), GetGlobal(0), Call(2), End][..]
-			);
-			assert_eq!(
-				get_function_body(&injected_module, 1).unwrap(),
-				&vec![
-					Instruction::GetGlobal(1),
-					Instruction::GetLocal(0),
-					Instruction::I64GeU,
-					Instruction::If(elements::BlockType::NoResult),
-					Instruction::GetGlobal(1),
-					Instruction::GetLocal(0),
-					Instruction::I64Sub,
-					Instruction::SetGlobal(1),
-					Instruction::Else,
-					// sentinel val u64::MAX
-					Instruction::I64Const(-1i64), // non-charged instruction
-					Instruction::SetGlobal(1),    // non-charged instruction
-					Instruction::Unreachable,     // non-charged instruction
-					Instruction::End,
-					Instruction::End,
-				][..]
-			);
-			assert_eq!(
-				get_function_body(&injected_module, 2).unwrap(),
-				&vec![
-					GetLocal(0),
-					GetLocal(0),
-					I64ExtendUI32,
-					I64Const(10000),
-					I64Mul,
-					Call(1),
-					GrowMemory(0),
-					End,
-				][..]
-			);
+		let backend = mutable_global::Injector::new("env", "gas_left");
+		let injected_raw_wasm =
+			super::inject(&mut module, backend, &ConstantCostRules::new(1, 10_000, 1)).unwrap();
 
-			let binary = serialize(injected_module).expect("serialization failed");
-			wasmparser::validate(&binary).unwrap();
-		}
+		// gas_counter
+		assert!(check_expect_function_body(
+			&injected_raw_wasm,
+			1,
+			&[
+				GlobalGet(1),
+				LocalGet(1),
+				I64GeU,
+				If(BlockType::Empty),
+				GlobalGet(1),
+				LocalGet(0),
+				I64Sub,
+				GlobalSet(1),
+				Else,
+				I64Const(-1i64),
+				GlobalSet(1),
+				Unreachable,
+				End,
+				End
+			]
+		));
 
-		#[test]
-		fn grow_no_gas_no_track_host_fn() {
-			let module = parse_wat(
-				r"(module
+		// grow_counter
+		assert!(check_expect_function_body(
+			&injected_raw_wasm,
+			1,
+			&[
+				LocalGet(0),
+				LocalGet(0),
+				I64ExtendI32U,
+				I64Const(10000i64),
+				I64Mul,
+				Call(1),
+				MemoryGrow(0),
+				End
+			]
+		));
+
+		wasmparser::validate(&injected_raw_wasm).unwrap();
+	}
+
+	#[test]
+	fn grow_no_gas_no_track_host_fn() {
+		let mut module = parse_wat(
+			r"(module
 				(func (result i32)
 				  global.get 0
 				  memory.grow)
 				(global i32 (i32.const 42))
 				(memory 0 1)
 				)",
-			);
-			let backend = host_function::Injector::new("env", "gas");
-			let injected_module =
-				super::inject(module, backend, &ConstantCostRules::default()).unwrap();
+		);
 
-			assert_eq!(
-				get_function_body(&injected_module, 0).unwrap(),
-				&vec![I64Const(2), Call(0), GetGlobal(0), GrowMemory(0), End][..]
-			);
+		let backend = host_function::Injector::new("env", "gas");
+		let injected_raw_wasm =
+			super::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
 
-			assert_eq!(injected_module.functions_space(), 2);
+		// main function
+		assert!(check_expect_function_body(
+			&injected_raw_wasm,
+			0,
+			&[I64Const(2), Call(0), GlobalGet(0), MemoryGrow(0), End,]
+		));
 
-			let binary = serialize(injected_module).expect("serialization failed");
-			wasmparser::validate(&binary).unwrap();
-		}
+		// Sum of local ('main') and imported functions ('gas') shall be 2
+		assert_eq!(module.num_functions(), 2);
 
-		#[test]
-		fn grow_no_gas_no_track_mut_global() {
-			let module = parse_wat(
-				r"(module
-				(func (result i32)
-				  global.get 0
-				  memory.grow)
-				(global i32 (i32.const 42))
-				(memory 0 1)
+		wasmparser::validate(&injected_raw_wasm).unwrap();
+	}
+	/*
+			#[test]
+			fn grow_no_gas_no_track_mut_global() {
+				let module = parse_wat(
+					r"(module
+					(func (result i32)
+					  global.get 0
+					  memory.grow)
+					(global i32 (i32.const 42))
+					(memory 0 1)
+					)",
+				);
+				let backend = mutable_global::Injector::new("env", "gas_left");
+				let injected_module =
+					super::inject(module, backend, &ConstantCostRules::default()).unwrap();
+
+				assert_eq!(
+					get_function_body(&injected_module, 0).unwrap(),
+					&vec![I64Const(13), Call(1), GetGlobal(0), GrowMemory(0), End][..]
+				);
+
+				assert_eq!(injected_module.functions_space(), 2);
+
+				let binary = serialize(injected_module).expect("serialization failed");
+				wasmparser::validate(&binary).unwrap();
+			}
+	*/
+	#[test]
+	fn call_index_host_fn() {
+		let mut module = parse_wat(
+			r"(module
+				  (type (;0;) (func (result i32)))
+				  (func (;0;) (type 0) (result i32))
+				  (func (;1;) (type 0) (result i32)
+					call 0
+					if  ;; label = @1
+					  call 0
+					  call 0
+					  call 0
+					else
+					  call 0
+					  call 0
+					end
+					call 0
+				  )
+				  (global (;0;) i32 )
 				)",
-			);
-			let backend = mutable_global::Injector::new("env", "gas_left");
-			let injected_module =
-				super::inject(module, backend, &ConstantCostRules::default()).unwrap();
+		);
 
-			assert_eq!(
-				get_function_body(&injected_module, 0).unwrap(),
-				&vec![I64Const(13), Call(1), GetGlobal(0), GrowMemory(0), End][..]
-			);
+		let backend = host_function::Injector::new("env", "gas");
+		let injected_raw_wasm =
+			super::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
 
-			assert_eq!(injected_module.functions_space(), 2);
-
-			let binary = serialize(injected_module).expect("serialization failed");
-			wasmparser::validate(&binary).unwrap();
-		}
-
-		#[test]
-		fn call_index_host_fn() {
-			let module = builder::module()
-				.global()
-				.value_type()
-				.i32()
-				.build()
-				.function()
-				.signature()
-				.param()
-				.i32()
-				.build()
-				.body()
-				.build()
-				.build()
-				.function()
-				.signature()
-				.param()
-				.i32()
-				.build()
-				.body()
-				.with_instructions(elements::Instructions::new(vec![
-					Call(0),
-					If(elements::BlockType::NoResult),
-					Call(0),
-					Call(0),
-					Call(0),
-					Else,
-					Call(0),
-					Call(0),
-					End,
-					Call(0),
-					End,
-				]))
-				.build()
-				.build()
-				.build();
-
-			let backend = host_function::Injector::new("env", "gas");
-			let injected_module =
-				super::inject(module, backend, &ConstantCostRules::default()).unwrap();
-
-			assert_eq!(
-				get_function_body(&injected_module, 1).unwrap(),
-				&vec![
-					I64Const(3),
-					Call(0),
-					Call(1),
-					If(elements::BlockType::NoResult),
-					I64Const(3),
-					Call(0),
-					Call(1),
-					Call(1),
-					Call(1),
-					Else,
-					I64Const(2),
-					Call(0),
-					Call(1),
-					Call(1),
-					End,
-					Call(1),
-					End
-				][..]
-			);
-		}
-
+		// main function
+		assert!(check_expect_function_body(
+			&injected_raw_wasm,
+			1,
+			&vec![
+				I64Const(3),
+				Call(0),
+				Call(1),
+				If(BlockType::Empty),
+				I64Const(3),
+				Call(0),
+				Call(1),
+				Call(1),
+				Call(1),
+				Else,
+				I64Const(2),
+				Call(0),
+				Call(1),
+				Call(1),
+				End,
+				Call(1),
+				End
+			]
+		));
+	}
+	/*
 		#[test]
 		fn call_index_mut_global() {
 			let module = builder::module()
