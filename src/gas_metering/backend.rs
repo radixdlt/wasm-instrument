@@ -1,7 +1,6 @@
 //! Provides backends for the gas metering instrumentation
 use crate::parser::ModuleInfo;
 use wasm_encoder::Function;
-use wasmparser::Type;
 
 /// Implementation details of the specific method of the gas metering.
 #[derive(Clone)]
@@ -54,7 +53,7 @@ pub mod host_function {
 	}
 
 	impl Backend for Injector {
-		fn gas_meter<R: Rules>(self, module_info: &mut ModuleInfo, rules: &R) -> GasMeter {
+		fn gas_meter<R: Rules>(self, _module_info: &mut ModuleInfo, _rules: &R) -> GasMeter {
 			GasMeter::External { module: self.module, function: self.name }
 		}
 	}
@@ -125,8 +124,8 @@ pub mod mutable_global {
 				Operator::End,
 				Operator::End,
 			];
-			operators.iter().map(|op| {
-				let instr = DefaultTranslator.translate_op(&op).unwrap();
+			operators.iter().for_each(|op| {
+				let instr = DefaultTranslator.translate_op(op).unwrap();
 				func.instruction(&instr);
 			});
 
