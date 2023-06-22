@@ -34,7 +34,7 @@ pub trait Translator {
 		type_def(self.as_obj(), ty, s)
 	}
 
-	fn translate_import(&self, import: Import, s: &mut ImportSection) -> Result<()> {
+	fn translate_import(&mut self, import: Import, s: &mut ImportSection) -> Result<()> {
 		import_def(self.as_obj(), import, s)
 	}
 
@@ -159,7 +159,7 @@ pub fn type_def(t: &mut dyn Translator, ty: Type, s: &mut TypeSection) -> Result
 }
 
 #[allow(dead_code)]
-pub fn import_def(t: &dyn Translator, ty: Import, s: &mut ImportSection) -> Result<()> {
+pub fn import_def(t: &mut dyn Translator, ty: Import, s: &mut ImportSection) -> Result<()> {
 	let new_ty = match ty.ty {
 		wasmparser::TypeRef::Func(v) => EntityType::Function(v),
 		wasmparser::TypeRef::Tag(v) => EntityType::Tag(t.translate_tag_type(&v)?),
