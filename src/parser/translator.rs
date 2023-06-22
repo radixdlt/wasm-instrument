@@ -1,7 +1,9 @@
 use alloc::vec::Vec;
 use anyhow::{anyhow, Result};
 use wasm_encoder::*;
-use wasmparser::{DataKind, ElementKind, ExternalKind, FunctionBody, Global, Operator, Type};
+use wasmparser::{
+	DataKind, ElementKind, ExternalKind, FunctionBody, Global, Import, Operator, Type,
+};
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub enum Item {
@@ -30,6 +32,10 @@ pub trait Translator {
 
 	fn translate_type_def(&mut self, ty: Type, s: &mut TypeSection) -> Result<()> {
 		type_def(self.as_obj(), ty, s)
+	}
+
+	fn translate_import(&self, import: Import, s: &mut ImportSection) -> Result<()> {
+		import_def(self.as_obj(), import, s)
 	}
 
 	fn translate_table_type(
@@ -150,6 +156,19 @@ pub fn type_def(t: &mut dyn Translator, ty: Type, s: &mut TypeSection) -> Result
 		},
 		Type::Array(_) => unimplemented!("Array and struct types are not supported yet."),
 	}
+}
+
+#[allow(dead_code)]
+pub fn import_def(t: &dyn Translator, ty: Import, s: &mut ImportSection) -> Result<()> {
+	let new_ty = match ty.ty {
+		wasmparser::TypeRef::Func(v) => EntityType::Function(v),
+		wasmparser::TypeRef::Tag(v) => EntityType::Tag(t.translate_tag_type(&v)?),
+		wasmparser::TypeRef::Global(v) => EntityType::Global(t.translate_global_type(&v)?),
+		wasmparser::TypeRef::Table(v) => EntityType::Table(t.translate_table_type(&v)?),
+		wasmparser::TypeRef::Memory(v) => EntityType::Memory(t.translate_memory_type(&v)?),
+	};
+	s.import(ty.module, ty.name, new_ty);
+	Ok(())
 }
 
 #[allow(dead_code)]
