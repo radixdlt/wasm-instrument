@@ -284,6 +284,15 @@ impl ModuleInfo {
 		Ok(())
 	}
 
+	pub fn get_count(&mut self, section: SectionId) -> Result<u32> {
+		if let Some(section) = self.raw_sections.get(&section.into()) {
+			let section_reader = wasmparser::ExportSectionReader::new(&section.data, 0)?;
+			Ok(section_reader.count())
+		} else {
+			Err(anyhow!("section not found"))
+		}
+	}
+
 	pub fn add_export(&mut self, name: &str, kind: ExportKind, index: u32) -> Result<()> {
 		let mut export_sec_builder = wasm_encoder::ExportSection::new();
 
