@@ -174,7 +174,6 @@ pub fn inject<R: Rules, B: Backend>(
 
 	let import_count = module_info.imported_functions_count;
 	let functions_space = module_info.num_functions();
-	let gas_global_idx = module_info.num_imported_globals();
 
 	// Calculate the indexes and gas function cost,
 	// for external gas function the cost is counted on the host side
@@ -187,23 +186,15 @@ pub fn inject<R: Rules, B: Backend>(
 			(import_count, functions_space + 1, 0, module_info.num_local_functions())
 		},
 		GasMeter::Internal { module: gas_module, global: global_name, ref func, cost } => {
+			let gas_global_idx = module_info.num_globals();
+
 			// Inject the gas counting global
-			module_info.add_import_global(
-				gas_module,
-				global_name,
+			module_info.add_global(
 				GlobalType { content_type: ValType::I64, mutable: true },
+				&wasm_encoder::ConstExpr::i64_const(0),
 			)?;
 
-			// Inject the export entry for the gas counting global
-			let exports = module_info.export_section().unwrap();
-			let mut export_sec_builder = ExportSection::new();
-			// Recreate current export section
-			for export in exports {
-				let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
-				export_sec_builder.export(export.name, export_kind, export.index);
-			}
-			export_sec_builder.export(global_name, ExportKind::Global, gas_global_idx);
-			module_info.replace_section(SectionId::Export.into(), &export_sec_builder)?;
+			module_info.add_export(global_name, ExportKind::Global, gas_global_idx)?;
 
 			// Inject the local gas function
 			let ty = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
@@ -227,12 +218,16 @@ pub fn inject<R: Rules, B: Backend>(
 	// Iterate over module sections and perform needed transformations.
 	// Indexes are needed to be fixed up in `GasMeter::External` case, as it adds an imported
 	// function, which goes to the beginning of the module's functions space.
-
 	if let Some(code_section) = module_info.raw_sections.get_mut(&SectionId::Code.into()) {
 		let mut code_section_builder = wasm_encoder::CodeSection::new();
 		let code_sec_reader = CodeSectionReader::new(&code_section.data, 0)?;
+		let code_item_count = code_sec_reader.count();
 
-		for func_body in code_sec_reader.into_iter().take(inject_targets as usize) {
+		for (func_body, is_last) in code_sec_reader
+			.into_iter()
+			.enumerate()
+			.map(|(index, item)| (item, index as u32 == code_item_count - 1))
+		{
 			let func_body = func_body?;
 			let current_locals = copy_locals(&func_body)?;
 
@@ -240,10 +235,10 @@ pub fn inject<R: Rules, B: Backend>(
 
 			let mut func_builder = wasm_encoder::Function::new(copy_locals(&func_body)?);
 
-			if let GasMeter::External { .. } = gas_meter {
-				let operator_reader = func_body.get_operators_reader()?;
-				for op in operator_reader {
-					let op = op?;
+			let operator_reader = func_body.get_operators_reader()?;
+			for op in operator_reader {
+				let op = op?;
+				if let GasMeter::External { .. } = gas_meter {
 					if let Operator::Call { function_index } = op {
 						if function_index >= gas_func_idx {
 							func_builder.instruction(&Instruction::Call(function_index + 1));
@@ -251,6 +246,18 @@ pub fn inject<R: Rules, B: Backend>(
 					} else {
 						func_builder.instruction(&DefaultTranslator.translate_op(&op)?);
 					}
+				} else {
+					func_builder.instruction(&DefaultTranslator.translate_op(&op)?);
+				}
+			}
+
+			if let GasMeter::Internal { .. } = gas_meter {
+				// If GasMeter::Internal then don't inject counters to the local gas function, which is the last one as
+				// it's just added. Cost for its execution is added statically before each
+				// invocation (see `inject_counter()`).
+				if is_last {
+					code_section_builder.function(&func_builder);
+					continue;
 				}
 			}
 
@@ -620,46 +627,6 @@ fn generate_grow_counter<R: Rules>(rules: &R, gas_func: u32) -> Option<(Type, Fu
 	Some((Type::Func(FuncType::new(vec![ValType::I32], vec![ValType::I32])), func))
 }
 
-/*
-fn add_grow_counter<R: Rules>(
-	module: elements::Module,
-	rules: &R,
-	gas_func: u32,
-) -> elements::Module {
-	use parity_wasm::elements::Instruction::*;
-
-	let cost = match rules.memory_grow_cost() {
-		MemoryGrowCost::Free => return module,
-		MemoryGrowCost::Linear(val) => val.get(),
-	};
-
-	let mut b = builder::from_module(module);
-	b.push_function(
-		builder::function()
-			.signature()
-			.with_param(ValueType::I32)
-			.with_result(ValueType::I32)
-			.build()
-			.body()
-			.with_instructions(elements::Instructions::new(vec![
-				GetLocal(0),
-				GetLocal(0),
-				I64ExtendUI32,
-				I64Const(i64::from(cost)),
-				I64Mul,
-				// todo: there should be strong guarantee that it does not return anything on
-				// stack?
-				Call(gas_func),
-				GrowMemory(0),
-				End,
-			]))
-			.build()
-			.build(),
-	);
-
-	b.build()
-}
-*/
 fn determine_metered_blocks<R: Rules>(
 	func_body: &wasmparser::FunctionBody,
 	rules: &R,
@@ -857,6 +824,29 @@ mod tests {
 		func_sec.data[start..func_body.range().end].to_vec()
 	}
 
+	fn get_function_operators(raw_wasm: &[u8], index: usize) -> Vec<Instruction> {
+		let mut module = ModuleInfo::new(raw_wasm).unwrap();
+		let func_sec = module.raw_sections.get_mut(&SectionId::Code.into()).unwrap();
+		let func_bodies = wasmparser::CodeSectionReader::new(&func_sec.data, 0)
+			.unwrap()
+			.into_iter()
+			.collect::<wasmparser::Result<Vec<FunctionBody>>>()
+			.unwrap();
+
+		let func_body = func_bodies
+			.get(index)
+			.unwrap_or_else(|| panic!("module doesn't have function {} body", index));
+
+		let operators = func_body
+			.get_operators_reader()
+			.unwrap()
+			.into_iter()
+			.map(|op| DefaultTranslator.translate_op(&op.unwrap()).unwrap())
+			.collect::<Vec<Instruction>>();
+
+		operators
+	}
+
 	fn parse_wat(source: &str) -> ModuleInfo {
 		let module_bytes = wat::parse_str(source).unwrap();
 		ModuleInfo::new(&module_bytes).unwrap()
@@ -925,7 +915,7 @@ mod tests {
 			1,
 			&[
 				GlobalGet(1),
-				LocalGet(1),
+				LocalGet(0),
 				I64GeU,
 				If(BlockType::Empty),
 				GlobalGet(1),
@@ -944,7 +934,7 @@ mod tests {
 		// grow_counter
 		assert!(check_expect_function_body(
 			&injected_raw_wasm,
-			1,
+			2,
 			&[
 				LocalGet(0),
 				LocalGet(0),
@@ -988,33 +978,34 @@ mod tests {
 
 		wasmparser::validate(&injected_raw_wasm).unwrap();
 	}
-	/*
-			#[test]
-			fn grow_no_gas_no_track_mut_global() {
-				let module = parse_wat(
-					r"(module
+	#[test]
+	fn grow_no_gas_no_track_mut_global() {
+		let mut module = parse_wat(
+			r"(module
 					(func (result i32)
 					  global.get 0
 					  memory.grow)
 					(global i32 (i32.const 42))
 					(memory 0 1)
 					)",
-				);
-				let backend = mutable_global::Injector::new("env", "gas_left");
-				let injected_module =
-					super::inject(module, backend, &ConstantCostRules::default()).unwrap();
+		);
 
-				assert_eq!(
-					get_function_body(&injected_module, 0).unwrap(),
-					&vec![I64Const(13), Call(1), GetGlobal(0), GrowMemory(0), End][..]
-				);
+		let backend = host_function::Injector::new("env", "gas");
+		let injected_raw_wasm =
+			super::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
 
-				assert_eq!(injected_module.functions_space(), 2);
+		// main function
+		assert!(check_expect_function_body(
+			&injected_raw_wasm,
+			0,
+			&[I64Const(2), Call(0), GlobalGet(0), MemoryGrow(0), End,]
+		));
 
-				let binary = serialize(injected_module).expect("serialization failed");
-				wasmparser::validate(&binary).unwrap();
-			}
-	*/
+		// Sum of local ('main') and imported functions ('gas') shall be 2
+		assert_eq!(module.num_functions(), 2);
+
+		wasmparser::validate(&injected_raw_wasm).unwrap();
+	}
 	#[test]
 	fn call_index_host_fn() {
 		let mut module = parse_wat(
@@ -1033,7 +1024,7 @@ mod tests {
 					end
 					call 0
 				  )
-				  (global (;0;) i32 )
+				  (global (;0;) i32 (i32.const 0))
 				)",
 		);
 
@@ -1066,390 +1057,374 @@ mod tests {
 			]
 		));
 	}
-	/*
-		#[test]
-		fn call_index_mut_global() {
-			let module = builder::module()
-				.global()
-				.value_type()
-				.i32()
-				.build()
-				.function()
-				.signature()
-				.param()
-				.i32()
-				.build()
-				.body()
-				.build()
-				.build()
-				.function()
-				.signature()
-				.param()
-				.i32()
-				.build()
-				.body()
-				.with_instructions(elements::Instructions::new(vec![
-					Call(0),
-					If(elements::BlockType::NoResult),
-					Call(0),
-					Call(0),
-					Call(0),
-					Else,
-					Call(0),
-					Call(0),
-					End,
-					Call(0),
-					End,
-				]))
-				.build()
-				.build()
-				.build();
+	#[test]
+	fn call_index_mut_global() {
+		let mut module = parse_wat(
+			r"(module
+				  (type (;0;) (func (result i32)))
+				  (func (;0;) (type 0) (result i32))
+				  (func (;1;) (type 0) (result i32)
+					call 0
+					if  ;; label = @1
+					  call 0
+					  call 0
+					  call 0
+					else
+					  call 0
+					  call 0
+					end
+					call 0
+				  )
+				  (global (;0;) i32 (i32.const 0))
+				)",
+		);
 
-			let backend = mutable_global::Injector::new("env", "gas_left");
-			let injected_module =
-				super::inject(module, backend, &ConstantCostRules::default()).unwrap();
+		let backend = mutable_global::Injector::new("env", "gas_left");
+		let injected_raw_wasm =
+			super::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
 
-			assert_eq!(
-				get_function_body(&injected_module, 1).unwrap(),
-				&vec![
-					I64Const(14),
-					Call(2),
-					Call(0),
-					If(elements::BlockType::NoResult),
-					I64Const(14),
-					Call(2),
-					Call(0),
-					Call(0),
-					Call(0),
-					Else,
-					I64Const(13),
-					Call(2),
-					Call(0),
-					Call(0),
-					End,
-					Call(0),
-					End
-				][..]
-			);
-		}
+		// main function
+		assert!(check_expect_function_body(
+			&injected_raw_wasm,
+			1,
+			&vec![
+				I64Const(14),
+				Call(2),
+				Call(0),
+				If(BlockType::Empty),
+				I64Const(14),
+				Call(2),
+				Call(0),
+				Call(0),
+				Call(0),
+				Else,
+				I64Const(13),
+				Call(2),
+				Call(0),
+				Call(0),
+				End,
+				Call(0),
+				End
+			]
+		));
+	}
 
-		macro_rules! test_gas_counter_injection {
-			(names = ($name1:ident, $name2:ident); input = $input:expr; expected = $expected:expr) => {
-				#[test]
-				fn $name1() {
-					let input_module = parse_wat($input);
-					let expected_module = parse_wat($expected);
-					let injected_module = super::inject(
-						input_module,
-						host_function::Injector::new("env", "gas"),
-						&ConstantCostRules::default(),
-					)
-					.expect("inject_gas_counter call failed");
+	macro_rules! test_gas_counter_injection {
+		(names = ($name1:ident, $name2:ident); input = $input:expr; expected = $expected:expr) => {
+			#[test]
+			fn $name1() {
+				let mut module = parse_wat($input);
+				let expected_module = parse_wat($expected);
+				let injected_wasm = super::inject(
+					&mut module,
+					host_function::Injector::new("env", "gas"),
+					&ConstantCostRules::default(),
+				)
+				.expect("inject_gas_counter call failed");
 
-					let actual_func_body = get_function_body(&injected_module, 0)
-						.expect("injected module must have a function body");
-					let expected_func_body = get_function_body(&expected_module, 0)
-						.expect("post-module must have a function body");
+				let actual_func_body = get_function_body(&injected_wasm, 0);
+				let expected_func_body = get_function_body(&expected_module.bytes(), 0);
 
-					assert_eq!(actual_func_body, expected_func_body);
-				}
+				assert_eq!(actual_func_body, expected_func_body);
+			}
 
-				#[test]
-				fn $name2() {
-					let input_module = parse_wat($input);
-					let draft_module = parse_wat($expected);
-					let gas_fun_cost = match mutable_global::Injector::new("env", "gas_left")
-						.gas_meter(&input_module, &ConstantCostRules::default())
-					{
-						GasMeter::Internal { cost, .. } => cost as i64,
-						_ => 0i64,
-					};
+			#[test]
+			fn $name2() {
+				let mut module = parse_wat($input);
+				let draft_module = parse_wat($expected);
+				let gas_fun_cost = match mutable_global::Injector::new("env", "gas_left")
+					.gas_meter(&mut module, &ConstantCostRules::default())
+				{
+					GasMeter::Internal { cost, .. } => cost as i64,
+					_ => 0i64,
+				};
 
-					let injected_module = super::inject(
-						input_module,
-						mutable_global::Injector::new("env", "gas_left"),
-						&ConstantCostRules::default(),
-					)
-					.expect("inject_gas_counter call failed");
+				let injected_wasm = super::inject(
+					&mut module,
+					mutable_global::Injector::new("env", "gas_left"),
+					&ConstantCostRules::default(),
+				)
+				.expect("inject_gas_counter call failed");
 
-					let actual_func_body = get_function_body(&injected_module, 0)
-						.expect("injected module must have a function body");
-					let mut expected_func_body = get_function_body(&draft_module, 0)
-						.expect("post-module must have a function body")
-						.to_vec();
+				let actual_func_body = get_function_body(&injected_wasm, 0);
 
-					// modify expected instructions set for gas_metering::mutable_global
-					let mut iter = expected_func_body.iter_mut();
-					while let Some(ins) = iter.next() {
-						if let I64Const(cost) = ins {
-							if let Some(ins_next) = iter.next() {
-								if let Call(0) = ins_next {
-									*cost += gas_fun_cost;
-									*ins_next = Call(1);
-								}
+				let expected_module_bytes = draft_module.bytes();
+				let mut expected_func_operators = get_function_operators(&expected_module_bytes, 0);
+
+				// modify expected instructions set for gas_metering::mutable_global
+				let mut iter = expected_func_operators.iter_mut();
+				while let Some(ins) = iter.next() {
+					if let I64Const(cost) = ins {
+						if let Some(ins_next) = iter.next() {
+							if let Call(0) = ins_next {
+								*cost += gas_fun_cost;
+								*ins_next = Call(1);
 							}
 						}
 					}
-
-					assert_eq!(actual_func_body, &expected_func_body);
 				}
-			};
-		}
+				let mut expected_func_body = vec![];
+				expected_func_operators.iter().for_each(|v| v.encode(&mut expected_func_body));
 
-		test_gas_counter_injection! {
-			names = (simple_host_fn, simple_mut_global);
-			input = r#"
-			(module
-				(func (result i32)
-					(get_global 0)))
-			"#;
-			expected = r#"
-			(module
-				(func (result i32)
-					(call 0 (i64.const 1))
-					(get_global 0)))
-			"#
-		}
+				assert_eq!(actual_func_body, expected_func_body);
+			}
+		};
+	}
 
-		test_gas_counter_injection! {
-			names = (nested_host_fn, nested_mut_global);
-			input = r#"
-			(module
-				(func (result i32)
-					(get_global 0)
-					(block
-						(get_global 0)
-						(get_global 0)
-						(get_global 0))
-					(get_global 0)))
-			"#;
-			expected = r#"
-			(module
-				(func (result i32)
-					(call 0 (i64.const 6))
-					(get_global 0)
-					(block
-						(get_global 0)
-						(get_global 0)
-						(get_global 0))
-					(get_global 0)))
-			"#
-		}
-
-		test_gas_counter_injection! {
-			names = (ifelse_host_fn, ifelse_mut_global);
-			input = r#"
-			(module
-				(func (result i32)
-					(get_global 0)
-					(if
-						(then
-							(get_global 0)
-							(get_global 0)
-							(get_global 0))
-						(else
-							(get_global 0)
+	test_gas_counter_injection! {
+		names = (simple_host_fn, simple_mut_global);
+		input = r#"
+					(module
+						(func (result i32)
 							(get_global 0)))
-					(get_global 0)))
-			"#;
-			expected = r#"
-			(module
-				(func (result i32)
-					(call 0 (i64.const 3))
-					(get_global 0)
-					(if
-						(then
+					"#;
+		expected = r#"
+					(module
+						(func (result i32)
+							(call 0 (i64.const 1))
+							(get_global 0)))
+					"#
+	}
+
+	test_gas_counter_injection! {
+		names = (nested_host_fn, nested_mut_global);
+		input = r#"
+					(module
+						(func (result i32)
+							(get_global 0)
+							(block
+								(get_global 0)
+								(get_global 0)
+								(get_global 0))
+							(get_global 0)))
+					"#;
+		expected = r#"
+					(module
+						(func (result i32)
+							(call 0 (i64.const 6))
+							(get_global 0)
+							(block
+								(get_global 0)
+								(get_global 0)
+								(get_global 0))
+							(get_global 0)))
+					"#
+	}
+
+	test_gas_counter_injection! {
+		names = (ifelse_host_fn, ifelse_mut_global);
+		input = r#"
+					(module
+						(func (result i32)
+							(get_global 0)
+							(if
+								(then
+									(get_global 0)
+									(get_global 0)
+									(get_global 0))
+								(else
+									(get_global 0)
+									(get_global 0)))
+							(get_global 0)))
+					"#;
+		expected = r#"
+					(module
+						(func (result i32)
 							(call 0 (i64.const 3))
 							(get_global 0)
-							(get_global 0)
-							(get_global 0))
-						(else
-							(call 0 (i64.const 2))
-							(get_global 0)
+							(if
+								(then
+									(call 0 (i64.const 3))
+									(get_global 0)
+									(get_global 0)
+									(get_global 0))
+								(else
+									(call 0 (i64.const 2))
+									(get_global 0)
+									(get_global 0)))
 							(get_global 0)))
-					(get_global 0)))
-			"#
-		}
+					"#
+	}
 
-		test_gas_counter_injection! {
-			names = (branch_innermost_host_fn, branch_innermost_mut_global);
-			input = r#"
-			(module
-				(func (result i32)
-					(get_global 0)
-					(block
-						(get_global 0)
-						(drop)
-						(br 0)
-						(get_global 0)
-						(drop))
-					(get_global 0)))
-			"#;
-			expected = r#"
-			(module
-				(func (result i32)
-					(call 0 (i64.const 6))
-					(get_global 0)
-					(block
-						(get_global 0)
-						(drop)
-						(br 0)
-						(call 0 (i64.const 2))
-						(get_global 0)
-						(drop))
-					(get_global 0)))
-			"#
-		}
-
-		test_gas_counter_injection! {
-			names = (branch_outer_block_host_fn, branch_outer_block_mut_global);
-			input = r#"
-			(module
-				(func (result i32)
-					(get_global 0)
-					(block
-						(get_global 0)
-						(if
-							(then
-								(get_global 0)
+	test_gas_counter_injection! {
+		names = (branch_innermost_host_fn, branch_innermost_mut_global);
+		input = r#"
+					(module
+						(func (result i32)
+							(get_global 0)
+							(block
 								(get_global 0)
 								(drop)
-								(br_if 1)))
-						(get_global 0)
-						(drop))
-					(get_global 0)))
-			"#;
-			expected = r#"
-			(module
-				(func (result i32)
-					(call 0 (i64.const 5))
-					(get_global 0)
-					(block
-						(get_global 0)
-						(if
-							(then
-								(call 0 (i64.const 4))
+								(br 0)
 								(get_global 0)
+								(drop))
+							(get_global 0)))
+					"#;
+		expected = r#"
+					(module
+						(func (result i32)
+							(call 0 (i64.const 6))
+							(get_global 0)
+							(block
 								(get_global 0)
 								(drop)
-								(br_if 1)))
-						(call 0 (i64.const 2))
-						(get_global 0)
-						(drop))
-					(get_global 0)))
-			"#
-		}
-
-		test_gas_counter_injection! {
-			names = (branch_outer_loop_host_fn, branch_outer_loop_mut_global);
-			input = r#"
-			(module
-				(func (result i32)
-					(get_global 0)
-					(loop
-						(get_global 0)
-						(if
-							(then
-								(get_global 0)
-								(br_if 0))
-							(else
-								(get_global 0)
-								(get_global 0)
-								(drop)
-								(br_if 1)))
-						(get_global 0)
-						(drop))
-					(get_global 0)))
-			"#;
-			expected = r#"
-			(module
-				(func (result i32)
-					(call 0 (i64.const 3))
-					(get_global 0)
-					(loop
-						(call 0 (i64.const 4))
-						(get_global 0)
-						(if
-							(then
+								(br 0)
 								(call 0 (i64.const 2))
 								(get_global 0)
-								(br_if 0))
-							(else
+								(drop))
+							(get_global 0)))
+					"#
+	}
+
+	test_gas_counter_injection! {
+		names = (branch_outer_block_host_fn, branch_outer_block_mut_global);
+		input = r#"
+					(module
+						(func (result i32)
+							(get_global 0)
+							(block
+								(get_global 0)
+								(if
+									(then
+										(get_global 0)
+										(get_global 0)
+										(drop)
+										(br_if 1)))
+								(get_global 0)
+								(drop))
+							(get_global 0)))
+					"#;
+		expected = r#"
+					(module
+						(func (result i32)
+							(call 0 (i64.const 5))
+							(get_global 0)
+							(block
+								(get_global 0)
+								(if
+									(then
+										(call 0 (i64.const 4))
+										(get_global 0)
+										(get_global 0)
+										(drop)
+										(br_if 1)))
+								(call 0 (i64.const 2))
+								(get_global 0)
+								(drop))
+							(get_global 0)))
+					"#
+	}
+
+	test_gas_counter_injection! {
+		names = (branch_outer_loop_host_fn, branch_outer_loop_mut_global);
+		input = r#"
+					(module
+						(func (result i32)
+							(get_global 0)
+							(loop
+								(get_global 0)
+								(if
+									(then
+										(get_global 0)
+										(br_if 0))
+									(else
+										(get_global 0)
+										(get_global 0)
+										(drop)
+										(br_if 1)))
+								(get_global 0)
+								(drop))
+							(get_global 0)))
+					"#;
+		expected = r#"
+					(module
+						(func (result i32)
+							(call 0 (i64.const 3))
+							(get_global 0)
+							(loop
 								(call 0 (i64.const 4))
 								(get_global 0)
+								(if
+									(then
+										(call 0 (i64.const 2))
+										(get_global 0)
+										(br_if 0))
+									(else
+										(call 0 (i64.const 4))
+										(get_global 0)
+										(get_global 0)
+										(drop)
+										(br_if 1)))
 								(get_global 0)
-								(drop)
-								(br_if 1)))
-						(get_global 0)
-						(drop))
-					(get_global 0)))
-			"#
-		}
+								(drop))
+							(get_global 0)))
+					"#
+	}
 
-		test_gas_counter_injection! {
-			names = (return_from_func_host_fn, return_from_func_mut_global);
-			input = r#"
-			(module
-				(func (result i32)
-					(get_global 0)
-					(if
-						(then
-							(return)))
-					(get_global 0)))
-			"#;
-			expected = r#"
-			(module
-				(func (result i32)
-					(call 0 (i64.const 2))
-					(get_global 0)
-					(if
-						(then
+	test_gas_counter_injection! {
+		names = (return_from_func_host_fn, return_from_func_mut_global);
+		input = r#"
+					(module
+						(func (result i32)
+							(get_global 0)
+							(if
+								(then
+									(return)))
+							(get_global 0)))
+					"#;
+		expected = r#"
+					(module
+						(func (result i32)
+							(call 0 (i64.const 2))
+							(get_global 0)
+							(if
+								(then
+									(call 0 (i64.const 1))
+									(return)))
 							(call 0 (i64.const 1))
-							(return)))
-					(call 0 (i64.const 1))
-					(get_global 0)))
-			"#
-		}
+							(get_global 0)))
+					"#
+	}
 
-		test_gas_counter_injection! {
-			names = (branch_from_if_not_else_host_fn, branch_from_if_not_else_mut_global);
-			input = r#"
-			(module
-				(func (result i32)
-					(get_global 0)
-					(block
+	test_gas_counter_injection! {
+		names = (branch_from_if_not_else_host_fn, branch_from_if_not_else_mut_global);
+		input = r#"
+				(module
+					(func (result i32)
 						(get_global 0)
-						(if
-							(then (br 1))
-							(else (br 0)))
+						(block
+							(get_global 0)
+							(if
+								(then (br 1))
+								(else (br 0)))
+							(get_global 0)
+							(drop))
+						(get_global 0)))
+				"#;
+		expected = r#"
+				(module
+					(func (result i32)
+						(call 0 (i64.const 5))
 						(get_global 0)
-						(drop))
-					(get_global 0)))
-			"#;
-			expected = r#"
-			(module
-				(func (result i32)
-					(call 0 (i64.const 5))
-					(get_global 0)
-					(block
-						(get_global 0)
-						(if
-							(then
-								(call 0 (i64.const 1))
-								(br 1))
-							(else
-								(call 0 (i64.const 1))
-								(br 0)))
-						(call 0 (i64.const 2))
-						(get_global 0)
-						(drop))
-					(get_global 0)))
-			"#
-		}
+						(block
+							(get_global 0)
+							(if
+								(then
+									(call 0 (i64.const 1))
+									(br 1))
+								(else
+									(call 0 (i64.const 1))
+									(br 0)))
+							(call 0 (i64.const 2))
+							(get_global 0)
+							(drop))
+						(get_global 0)))
+				"#
+	}
 
-		test_gas_counter_injection! {
-			names = (empty_loop_host_fn, empty_loop_mut_global);
-			input = r#"
+	test_gas_counter_injection! {
+		names = (empty_loop_host_fn, empty_loop_mut_global);
+		input = r#"
 			(module
 				(func
 					(loop
@@ -1459,7 +1434,7 @@ mod tests {
 				)
 			)
 			"#;
-			expected = r#"
+		expected = r#"
 			(module
 				(func
 					(call 0 (i64.const 2))
@@ -1471,6 +1446,5 @@ mod tests {
 				)
 			)
 			"#
-		}
-	*/
+	}
 }
