@@ -294,24 +294,24 @@ impl ModuleInfo {
 	}
 
 	pub fn add_export(&mut self, name: &str, kind: ExportKind, index: u32) -> Result<()> {
-		let mut export_sec_builder = wasm_encoder::ExportSection::new();
+		let mut section_builder = wasm_encoder::ExportSection::new();
 
 		if let Some(section) = self.raw_sections.get(&SectionId::Export.into()) {
-			let export_sec_reader = wasmparser::ExportSectionReader::new(&section.data, 0)?;
+			let section_reader = wasmparser::ExportSectionReader::new(&section.data, 0)?;
 
-			for export in export_sec_reader {
-				let export = export?;
+			for section_item in section_reader {
+				let export = section_item?;
 				let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
-				export_sec_builder.export(export.name, export_kind, export.index);
+				section_builder.export(export.name, export_kind, export.index);
 			}
 		}
-		export_sec_builder.export(name, kind, index);
 
+		section_builder.export(name, kind, index);
 		if let ExportKind::Global = kind {
 			self.exports_global_count += 1;
 		}
 		self.export_names.insert(name.into());
-		self.replace_section(SectionId::Export.into(), &export_sec_builder)
+		self.replace_section(SectionId::Export.into(), &section_builder)
 	}
 
 	pub fn add_global(
@@ -319,60 +319,54 @@ impl ModuleInfo {
 		global_type: GlobalType,
 		init_expr: &wasm_encoder::ConstExpr,
 	) -> Result<()> {
-		let mut global_sec_builder = wasm_encoder::GlobalSection::new();
-		let global_sec_reader = wasmparser::GlobalSectionReader::new(
-			&self
-				.raw_sections
-				.get(&SectionId::Global.into())
-				.ok_or_else(|| anyhow!("code not exit"))?
-				.data,
-			0,
-		)?;
+		let mut section_builder = wasm_encoder::GlobalSection::new();
 
-		for global in global_sec_reader {
-			DefaultTranslator.translate_global(global?, &mut global_sec_builder)?;
+		if let Some(section) = self.raw_sections.get(&SectionId::Global.into()) {
+			let section_reader = wasmparser::GlobalSectionReader::new(&section.data, 0)?;
+
+			for section_item in section_reader {
+				DefaultTranslator.translate_global(section_item?, &mut section_builder)?;
+			}
 		}
 
+		section_builder.global(DefaultTranslator.translate_global_type(&global_type)?, init_expr);
 		self.global_types.push(global_type);
-		global_sec_builder
-			.global(DefaultTranslator.translate_global_type(&global_type)?, init_expr);
 
-		self.replace_section(SectionId::Global.into(), &global_sec_builder)
+		self.replace_section(SectionId::Global.into(), &section_builder)
 	}
 
 	pub fn add_func(&mut self, func_type: Type, func_body: &wasm_encoder::Function) -> Result<()> {
 		let func_type_index = self.add_func_type(&func_type)?;
 
-		let mut func_sec_builder = wasm_encoder::FunctionSection::new();
-		let func_sec_reader = wasmparser::FunctionSectionReader::new(
-			&self
-				.raw_sections
-				.get(&SectionId::Function.into())
-				.ok_or_else(|| anyhow!("code not exit"))?
-				.data,
-			0,
-		)?;
-		for func in func_sec_reader {
-			func_sec_builder.function(func?);
-		}
-		self.function_map.push(func_type_index);
-		func_sec_builder.function(func_type_index);
-		self.replace_section(SectionId::Function.into(), &func_sec_builder)?;
+		// Recreate Function section
+		let mut section_builder = wasm_encoder::FunctionSection::new();
 
-		let mut code_sec_builder = wasm_encoder::CodeSection::new();
-		let code_sec_reader = wasmparser::CodeSectionReader::new(
-			&self
-				.raw_sections
-				.get(&SectionId::Code.into())
-				.ok_or_else(|| anyhow!("code not exit"))?
-				.data,
-			0,
-		)?;
-		for code in code_sec_reader {
-			DefaultTranslator.translate_code(code?, &mut code_sec_builder)?
+		if let Some(section) = self.raw_sections.get(&SectionId::Function.into()) {
+			let section_reader = wasmparser::FunctionSectionReader::new(&section.data, 0)?;
+
+			for section_item in section_reader {
+				section_builder.function(section_item?);
+			}
 		}
-		code_sec_builder.function(func_body);
-		self.replace_section(SectionId::Code.into(), &code_sec_builder)
+		// Define a new function in Function section
+		section_builder.function(func_type_index);
+		self.function_map.push(func_type_index);
+		self.replace_section(SectionId::Function.into(), &section_builder)?;
+
+		// Recreate Code section
+		let mut section_builder = wasm_encoder::CodeSection::new();
+
+		if let Some(section) = self.raw_sections.get(&SectionId::Code.into()) {
+			let section_reader = wasmparser::CodeSectionReader::new(&section.data, 0)?;
+
+			for section_item in section_reader {
+				DefaultTranslator.translate_code(section_item?, &mut section_builder)?
+			}
+		}
+
+		// Write new function body in Code section
+		section_builder.function(func_body);
+		self.replace_section(SectionId::Code.into(), &section_builder)
 	}
 
 	pub fn add_import_func(
@@ -383,6 +377,7 @@ impl ModuleInfo {
 	) -> Result<()> {
 		let func_type_idx = self.add_func_type(&func_type)?;
 
+		// Recreate Import section
 		let mut import_decoder = wasm_encoder::ImportSection::new();
 		if let Some(import_sec) = self.raw_sections.get_mut(&SectionId::Import.into()) {
 			let import_sec_reader = wasmparser::ImportSectionReader::new(&import_sec.data, 0)?;
@@ -391,6 +386,7 @@ impl ModuleInfo {
 			}
 		}
 
+		// Define new function import in the Import section.
 		import_decoder.import(module, func_name, wasm_encoder::EntityType::Function(func_type_idx));
 		self.function_map.push(func_type_idx);
 		self.imported_functions_count += 1;
@@ -411,6 +407,7 @@ impl ModuleInfo {
 			}
 		}
 
+		// Define new global import in the Import section.
 		import_decoder.import(
 			module,
 			global_name,
