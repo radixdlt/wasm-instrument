@@ -21,11 +21,11 @@ use anyhow::{anyhow, Result};
 use core::{cmp::min, mem, num::NonZeroU32};
 use wasm_encoder::{
 	ElementMode, ElementSection, ElementSegment, Elements, ExportKind, ExportSection, Function,
-	ImportSection, Instruction, SectionId, StartSection,
+	Instruction, SectionId, StartSection,
 };
 use wasmparser::{
 	CodeSectionReader, ElementItems, ElementKind, ElementSectionReader, ExternalKind, FuncType,
-	FunctionBody, ImportSectionReader, Operator, Type,
+	FunctionBody, GlobalType, Operator, Type, ValType,
 };
 
 /// An interface that describes instruction costs.
@@ -181,14 +181,18 @@ pub fn inject<R: Rules, B: Backend>(
 	let (gas_func_idx, total_func, gas_fn_cost, inject_targets) = match gas_meter {
 		GasMeter::External { module: gas_module, function } => {
 			// Inject the import of the gas function
-			let ty = Type::Func(FuncType::new(vec![wasmparser::ValType::I64], vec![]));
+			let ty = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
 			module_info.add_import_func(gas_module, function, ty)?;
 
 			(import_count, functions_space + 1, 0, module_info.num_local_functions())
 		},
 		GasMeter::Internal { module: gas_module, global: global_name, ref func, cost } => {
 			// Inject the gas counting global
-			add_gas_global_import(module_info, gas_module, global_name)?;
+			module_info.add_import_global(
+				gas_module,
+				global_name,
+				GlobalType { content_type: ValType::I64, mutable: true },
+			)?;
 
 			// Inject the export entry for the gas counting global
 			let exports = module_info.export_section().unwrap();
@@ -202,7 +206,7 @@ pub fn inject<R: Rules, B: Backend>(
 			module_info.replace_section(SectionId::Export.into(), &export_sec_builder)?;
 
 			// Inject the local gas function
-			let ty = Type::Func(FuncType::new(vec![wasmparser::ValType::I64], vec![]));
+			let ty = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
 			module_info.add_func(ty, func)?;
 
 			// Don't inject counters to the local gas function, which is the last one as
@@ -327,7 +331,7 @@ pub fn inject<R: Rules, B: Backend>(
 					ElementKind::Active { table_index, offset_expr } => {
 						offset = DefaultTranslator.translate_const_expr(
 							&offset_expr,
-							&wasmparser::ValType::I32,
+							&ValType::I32,
 							ConstExprKind::ElementOffset,
 						)?;
 
@@ -612,13 +616,7 @@ fn generate_grow_counter<R: Rules>(rules: &R, gas_func: u32) -> Option<(Type, Fu
 	func.instruction(&wasm_encoder::Instruction::Call(gas_func));
 	func.instruction(&wasm_encoder::Instruction::MemoryGrow(0));
 	func.instruction(&wasm_encoder::Instruction::End);
-	Some((
-		Type::Func(wasmparser::FuncType::new(
-			vec![wasmparser::ValType::I32],
-			vec![wasmparser::ValType::I32],
-		)),
-		func,
-	))
+	Some((Type::Func(FuncType::new(vec![ValType::I32], vec![ValType::I32])), func))
 }
 
 /*
@@ -816,28 +814,6 @@ fn insert_metering_calls(
 	}
 
 	Ok(new_func)
-}
-
-fn add_gas_global_import(
-	module: &mut ModuleInfo,
-	gas_module_name: &str,
-	gas_global: &str,
-) -> Result<()> {
-	let mut import_decoder = ImportSection::new();
-	if let Some(import_sec) = module.raw_sections.get_mut(&SectionId::Import.into()) {
-		let import_sec_reader = ImportSectionReader::new(&import_sec.data, 0)?;
-		for import in import_sec_reader {
-			DefaultTranslator.translate_import(import?, &mut import_decoder)?;
-		}
-	}
-
-	import_decoder.import(
-		gas_module_name,
-		gas_global,
-		wasm_encoder::GlobalType { val_type: wasm_encoder::ValType::I64, mutable: true },
-	);
-	module.imported_globals_count += 1;
-	module.replace_section(SectionId::Import.into(), &import_decoder)
 }
 
 #[cfg(test)]

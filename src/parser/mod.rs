@@ -338,7 +338,29 @@ impl ModuleInfo {
 		import_decoder.import(module, func_name, wasm_encoder::EntityType::Function(func_type_idx));
 		self.function_map.push(func_type_idx);
 		self.imported_functions_count += 1;
-		//			module_info.imported_globals_count += 1;
+		self.replace_section(SectionId::Import.into(), &import_decoder)
+	}
+
+	pub fn add_import_global(
+		&mut self,
+		module: &str,
+		global_name: &str,
+		global_type: GlobalType,
+	) -> Result<()> {
+		let mut import_decoder = wasm_encoder::ImportSection::new();
+		if let Some(import_sec) = self.raw_sections.get_mut(&SectionId::Import.into()) {
+			let import_sec_reader = wasmparser::ImportSectionReader::new(&import_sec.data, 0)?;
+			for import in import_sec_reader {
+				DefaultTranslator.translate_import(import?, &mut import_decoder)?;
+			}
+		}
+
+		import_decoder.import(
+			module,
+			global_name,
+			DefaultTranslator.translate_global_type(&global_type)?,
+		);
+		self.imported_globals_count += 1;
 		self.replace_section(SectionId::Import.into(), &import_decoder)
 	}
 
