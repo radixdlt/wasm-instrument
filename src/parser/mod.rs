@@ -5,7 +5,7 @@ use crate::parser::translator::{DefaultTranslator, Translator};
 use alloc::collections::{BTreeMap, BTreeSet};
 use anyhow::{anyhow, Result};
 use core::ops::Range;
-use wasm_encoder::{Encode, SectionId};
+use wasm_encoder::{Encode, ExportKind, SectionId};
 use wasmparser::{
 	Chunk, Export, ExportSectionReader, ExternalKind, Global, GlobalSectionReader, GlobalType,
 	MemoryType, Parser, Payload, Result as WasmParserResult, TableType, Type,
@@ -282,6 +282,27 @@ impl ModuleInfo {
 		self.raw_sections
 			.insert(sec_type, RawSection::new(sec_type, truncate_len_from_encoder(new_section)?));
 		Ok(())
+	}
+
+	pub fn add_export(&mut self, name: &str, kind: ExportKind, index: u32) -> Result<()> {
+		let mut export_sec_builder = wasm_encoder::ExportSection::new();
+
+		if let Some(section) = self.raw_sections.get(&SectionId::Export.into()) {
+			let export_sec_reader = wasmparser::ExportSectionReader::new(&section.data, 0)?;
+
+			for export in export_sec_reader {
+				let export = export?;
+				let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
+				export_sec_builder.export(export.name, export_kind, export.index);
+			}
+		}
+		export_sec_builder.export(name, kind, index);
+
+		if let ExportKind::Global = kind {
+			self.exports_global_count += 1;
+		}
+		self.export_names.insert(name.into());
+		self.replace_section(SectionId::Export.into(), &export_sec_builder)
 	}
 
 	pub fn add_global(
