@@ -284,6 +284,32 @@ impl ModuleInfo {
 		Ok(())
 	}
 
+	pub fn add_global(
+		&mut self,
+		global_type: GlobalType,
+		init_expr: &wasm_encoder::ConstExpr,
+	) -> Result<()> {
+		let mut global_sec_builder = wasm_encoder::GlobalSection::new();
+		let global_sec_reader = wasmparser::GlobalSectionReader::new(
+			&self
+				.raw_sections
+				.get(&SectionId::Global.into())
+				.ok_or_else(|| anyhow!("code not exit"))?
+				.data,
+			0,
+		)?;
+
+		for global in global_sec_reader {
+			DefaultTranslator.translate_global(global?, &mut global_sec_builder)?;
+		}
+
+		self.global_types.push(global_type);
+		global_sec_builder
+			.global(DefaultTranslator.translate_global_type(&global_type)?, init_expr);
+
+		self.replace_section(SectionId::Global.into(), &global_sec_builder)
+	}
+
 	pub fn add_func(&mut self, func_type: Type, func_body: &wasm_encoder::Function) -> Result<()> {
 		let func_type_index = self.add_func_type(&func_type)?;
 
