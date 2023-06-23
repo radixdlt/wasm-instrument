@@ -182,24 +182,7 @@ pub fn inject<R: Rules, B: Backend>(
 		GasMeter::External { module: gas_module, function } => {
 			// Inject the import of the gas function
 			let ty = Type::Func(FuncType::new(vec![wasmparser::ValType::I64], vec![]));
-
-			let func_type_idx = module_info.add_func_type(&ty)?;
-
-			let mut import_decoder = ImportSection::new();
-			if let Some(import_sec) = module_info.raw_sections.get_mut(&SectionId::Import.into()) {
-				let import_sec_reader = ImportSectionReader::new(&import_sec.data, 0)?;
-				for import in import_sec_reader {
-					DefaultTranslator.translate_import(import?, &mut import_decoder)?;
-				}
-			}
-
-			import_decoder.import(
-				gas_module,
-				function,
-				wasm_encoder::EntityType::Function(func_type_idx),
-			);
-			module_info.imported_globals_count += 1;
-			module_info.replace_section(SectionId::Import.into(), &import_decoder)?;
+			module_info.add_import_func(gas_module, function, ty)?;
 
 			(import_count, functions_space + 1, 0, module_info.num_local_functions())
 		},
