@@ -3,7 +3,7 @@ use std::{
 	io::{self, Read, Write},
 	path::{Path, PathBuf},
 };
-use wasm_instrument::{self as instrument, gas_metering, parity_wasm::elements};
+use wasm_instrument::{self as instrument, gas_metering};
 use wasmparser::validate;
 
 fn slurp<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
@@ -81,11 +81,11 @@ mod stack_height {
 					concat!(stringify!($name), ".wat"),
 					concat!(stringify!($name), ".wat"),
 					|input| {
-						let module =
-							elements::deserialize_buffer(input).expect("Failed to deserialize");
-						let instrumented = instrument::inject_stack_limiter(module, 1024)
+						let mut module = instrument::parser::ModuleInfo::new(input)
+							.expect("Failed to parse WASM input");
+						let instrumented = instrument::inject_stack_limiter(&mut module, 1024)
 							.expect("Failed to instrument with stack counter");
-						elements::serialize(instrumented).expect("Failed to serialize")
+						instrumented
 					},
 				);
 			}
@@ -115,14 +115,14 @@ mod gas {
 					|input| {
 						let rules = gas_metering::ConstantCostRules::default();
 
-						let module: elements::Module =
-							elements::deserialize_buffer(input).expect("Failed to deserialize");
-						let module = module.parse_names().expect("Failed to parse names");
+						let mut module = instrument::parser::ModuleInfo::new(input)
+							.expect("Failed to parse WASM input");
+
 						let backend = gas_metering::host_function::Injector::new("env", "gas");
 
-						let instrumented = gas_metering::inject(module, backend, &rules)
+						let instrumented = gas_metering::inject(&mut module, backend, &rules)
 							.expect("Failed to instrument with gas metering");
-						elements::serialize(instrumented).expect("Failed to serialize")
+						instrumented
 					},
 				);
 			}
@@ -136,13 +136,13 @@ mod gas {
 					|input| {
 						let rules = gas_metering::ConstantCostRules::default();
 
-						let module: elements::Module =
-							elements::deserialize_buffer(input).expect("Failed to deserialize");
-						let module = module.parse_names().expect("Failed to parse names");
-						let backend = gas_metering::mutable_global::Injector::new("gas_left");
-						let instrumented = gas_metering::inject(module, backend, &rules)
+						let mut module = instrument::parser::ModuleInfo::new(input)
+							.expect("Failed to parse WASM input");
+						let backend =
+							gas_metering::mutable_global::Injector::new("env", "gas_left");
+						let instrumented = gas_metering::inject(&mut module, backend, &rules)
 							.expect("Failed to instrument with gas metering");
-						elements::serialize(instrumented).expect("Failed to serialize")
+						instrumented
 					},
 				);
 			}
