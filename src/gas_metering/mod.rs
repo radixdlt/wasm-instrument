@@ -8,8 +8,8 @@ mod backend;
 
 pub use backend::{host_function, mutable_global, Backend, GasMeter};
 
-//#[cfg(test)]
-//mod validation;
+#[cfg(test)]
+mod validation;
 
 use crate::parser::{
 	copy_locals,
