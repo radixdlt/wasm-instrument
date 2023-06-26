@@ -125,6 +125,7 @@ fn build_control_flow_graph(
 	body: &wasmparser::FunctionBody,
 	rules: &impl Rules,
 	blocks: &[MeteredBlock],
+	locals_count: u32,
 ) -> Result<ControlFlowGraph> {
 	use wasmparser::Operator::*;
 
@@ -137,6 +138,9 @@ fn build_control_flow_graph(
 
 	let mut stack = vec![ControlFrame::new(entry_node_id, terminal_node_id, false)];
 	let mut metered_blocks_iter = blocks.iter().peekable();
+
+	let locals_init_cost = rules.call_per_local_cost().checked_mul(locals_count).ok_or(()).unwrap();
+
 	let operators = body
 		.get_operators_reader()?
 		.into_iter()
@@ -154,6 +158,11 @@ fn build_control_flow_graph(
 			let next_metered_block =
 				metered_blocks_iter.next().expect("peek returned an item; qed");
 			graph.increment_charged_cost(active_node_id, next_metered_block.cost);
+		}
+
+		// Add locals initialization cost to the function block.
+		if cursor == 0 {
+			graph.increment_actual_cost(active_node_id, locals_init_cost.into());
 		}
 
 		let instruction_cost = rules
@@ -330,8 +339,9 @@ fn validate_metering_injections(
 	body: &wasmparser::FunctionBody,
 	rules: &impl Rules,
 	blocks: &[MeteredBlock],
+	locals_count: u32,
 ) -> Result<bool> {
-	let graph = build_control_flow_graph(body, rules, blocks)?;
+	let graph = build_control_flow_graph(body, rules, blocks, locals_count)?;
 	Ok(validate_graph_gas_costs(&graph))
 }
 
@@ -365,8 +375,13 @@ mod tests {
 					let rules = ConstantCostRules::default();
 					let metered_blocks =
 						determine_metered_blocks(&func_body, &rules, locals_count).unwrap();
-					let success =
-						validate_metering_injections(&func_body, &rules, &metered_blocks).unwrap();
+					let success = validate_metering_injections(
+						&func_body,
+						&rules,
+						&metered_blocks,
+						locals_count,
+					)
+					.unwrap();
 					assert!(success);
 				}
 			}
