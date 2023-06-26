@@ -8,7 +8,7 @@
 //! searching through all paths, which may take exponential time in the size of the function body in
 //! the worst case.
 
-use super::{ConstantCostRules, MeteredBlock, Rules};
+use super::{MeteredBlock, Rules};
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap as Map;
 use wasmparser::Operator;
