@@ -185,7 +185,7 @@ pub fn inject<R: Rules, B: Backend>(
 
 			(import_count, functions_space + 1, 0, module_info.num_local_functions())
 		},
-		GasMeter::Internal { module: gas_module, global: global_name, ref func, cost } => {
+		GasMeter::Internal { module: _gas_module, global: global_name, ref func, cost } => {
 			let gas_global_idx = module_info.num_globals();
 
 			// Inject the gas counting global
@@ -1057,6 +1057,7 @@ mod tests {
 			]
 		));
 	}
+
 	#[test]
 	fn call_index_mut_global() {
 		let mut module = parse_wat(
