@@ -188,6 +188,7 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32> {
 		0,
 	)?;
 
+	// get_locals_reader() returns iterator over local types
 	let local_reader = code_section_reader
 		.into_iter()
 		.collect::<wasmparser::Result<Vec<FunctionBody>>>()?
@@ -195,7 +196,16 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32> {
 		.ok_or_else(|| anyhow!("function body is out of bounds"))?
 		.get_locals_reader()?;
 
-	let locals_count: u32 = local_reader.get_count();
+	let locals_count = {
+		let mut cnt = 0u32;
+		for local in local_reader {
+			// local keeps number of locals of given ValType
+			let (type_cnt, _) = local?;
+			cnt += type_cnt;
+		}
+		cnt
+	};
+
 	let max_stack_height = max_height::compute(defined_func_idx, module)?;
 
 	locals_count
