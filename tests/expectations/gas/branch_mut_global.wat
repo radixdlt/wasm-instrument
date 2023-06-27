@@ -5,7 +5,7 @@
     (local $x i32) (local $y i32)
     i64.const 26
     call 1
-    block ;; label = @1
+    block $unrolled_loop ;; label = @1
       i32.const 0
       local.set $x
       i32.const 1
