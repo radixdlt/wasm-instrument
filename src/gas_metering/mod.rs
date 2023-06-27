@@ -173,17 +173,29 @@ pub fn inject<R: Rules, B: Backend>(
 	let gas_meter = backend.gas_meter(module_info, rules);
 
 	let import_count = module_info.imported_functions_count;
-	let functions_space = module_info.num_functions();
+	let functions_count = module_info.num_functions();
 
 	// Calculate the indexes and gas function cost,
 	// for external gas function the cost is counted on the host side
-	let (gas_func_idx, total_func, gas_fn_cost, inject_targets) = match gas_meter {
+	let (
+		// Index of the gas function
+		gas_func_idx,
+		// Total number of functions (also the index of the next added function (if added)
+		grow_cnt_func_idx,
+		// Cost of the gas function execution
+		gas_fn_cost,
+	) = match gas_meter {
 		GasMeter::External { module: gas_module, function } => {
 			// Inject the import of the gas function
 			let ty = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
 			module_info.add_import_func(gas_module, function, ty)?;
 
-			(import_count, functions_space + 1, 0, module_info.num_local_functions())
+			(
+				// import_count has become an index of the imported gas function
+				import_count,
+				functions_count + 1,
+				0,
+			)
 		},
 		GasMeter::Internal { module: _gas_module, global: global_name, ref func, cost } => {
 			let gas_global_idx = module_info.num_globals();
@@ -200,18 +212,17 @@ pub fn inject<R: Rules, B: Backend>(
 			let ty = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
 			module_info.add_func(ty, func)?;
 
-			// Don't inject counters to the local gas function, which is the last one as
-			// it's just added. Cost for its execution is added statically before each
-			// invocation (see `inject_counter()`).
-			let inject_targets = module_info.num_local_functions() - 1;
-			let func_idx = functions_space;
-
-			(func_idx, func_idx + 1, cost, inject_targets)
+			(
+				// Don't inject counters to the local gas function, which is the last one as
+				// it's just added. Cost for its execution is added statically before each
+				// invocation (see `inject_counter()`).
+				functions_count,
+				functions_count + 1,
+				cost,
+			)
 		},
 	};
 
-	// TODO: what should be the proper value?
-	let grow_cnt_func = total_func;
 	let mut need_grow_counter = false;
 	let mut error = false;
 
@@ -280,7 +291,7 @@ pub fn inject<R: Rules, B: Backend>(
 				let counter;
 				(func_builder, counter) = inject_grow_counter(
 					&FunctionBody::new(0, &truncate_len_from_encoder(&func_builder)?),
-					grow_cnt_func,
+					grow_cnt_func_idx,
 				)?;
 				if counter > 0 {
 					need_grow_counter = true;
@@ -882,13 +893,6 @@ mod tests {
 		let func_body = func_bodies
 			.get(index)
 			.unwrap_or_else(|| panic!("module doesn't have function {} body", index));
-
-		let list = func_body
-			.get_operators_reader()
-			.unwrap()
-			.into_iter()
-			.map(|op| DefaultTranslator.translate_op(&op.unwrap()).unwrap())
-			.collect::<Vec<Instruction>>();
 
 		let start = func_body.get_operators_reader().unwrap().original_position();
 		func_sec.data[start..func_body.range().end].to_vec()
