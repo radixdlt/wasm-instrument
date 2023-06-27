@@ -8,7 +8,8 @@ use core::ops::Range;
 use wasm_encoder::{Encode, ExportKind, SectionId};
 use wasmparser::{
 	Chunk, Export, ExportSectionReader, ExternalKind, Global, GlobalSectionReader, GlobalType,
-	MemoryType, Parser, Payload, Result as WasmParserResult, TableType, Type,
+	IndirectNameMap, MemoryType, NameMap, Parser, Payload, Result as WasmParserResult, TableType,
+	Type,
 };
 
 #[derive(Clone, Debug)]
@@ -79,6 +80,7 @@ pub struct ModuleInfo {
 
 	// raw_sections
 	pub raw_sections: BTreeMap<u8, RawSection>,
+	pub component_raw_sections: BTreeMap<u8, RawSection>,
 }
 
 impl ModuleInfo {
@@ -95,6 +97,7 @@ impl ModuleInfo {
 				},
 				Chunk::Parsed { consumed, payload } => (payload, consumed),
 			};
+
 			match payload {
 				Payload::CodeSectionStart { count: _, range, size: _ } => {
 					info.section(SectionId::Code.into(), range.clone(), input_wasm);
@@ -203,7 +206,14 @@ impl ModuleInfo {
 					info.section(SectionId::Data.into(), reader.range(), input_wasm);
 				},
 				Payload::CustomSection(c) => {
-					info.section(SectionId::Custom.into(), c.range(), input_wasm);
+					// At the moment only name section supported
+					if c.name() == "name" {
+						info.section(
+							SectionId::Custom.into(),
+							Range { start: c.data_offset(), end: c.range().end },
+							input_wasm,
+						);
+					}
 				},
 				Payload::UnknownSection { id, contents: _, range } => {
 					info.section(id, range, input_wasm);
@@ -212,7 +222,9 @@ impl ModuleInfo {
 					info.section(SectionId::DataCount.into(), range, input_wasm);
 				},
 				Payload::Version { .. } => {},
-				Payload::End(_) => break,
+				Payload::End(_) => {
+					break;
+				},
 				_ => todo!("{:?} not implemented", payload),
 			}
 			wasm = &wasm[consumed..];
@@ -551,4 +563,27 @@ pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Res
 	let mut r = wasmparser::BinaryReader::new(&d);
 	let size = r.read_var_u32()?;
 	Ok(r.read_bytes(size as usize)?.to_vec())
+}
+
+pub fn rebuild_name_map(name_map: NameMap) -> Result<wasm_encoder::NameMap> {
+	let mut encoded_map = wasm_encoder::NameMap::new();
+
+	for naming in name_map {
+		let naming = naming?;
+		encoded_map.append(naming.index, naming.name);
+	}
+	Ok(encoded_map)
+}
+
+pub fn rebuild_indirect_name_map(
+	indirect_name_map: IndirectNameMap,
+) -> Result<wasm_encoder::IndirectNameMap> {
+	let mut encoded_map = wasm_encoder::IndirectNameMap::new();
+	for indirect_naming in indirect_name_map {
+		let indirect_naming = indirect_naming?;
+		let new_map = rebuild_name_map(indirect_naming.names)?;
+
+		encoded_map.append(indirect_naming.index, &new_map);
+	}
+	Ok(encoded_map)
 }

@@ -12,7 +12,7 @@ pub use backend::{host_function, mutable_global, Backend, GasMeter};
 mod validation;
 
 use crate::parser::{
-	copy_locals,
+	copy_locals, rebuild_indirect_name_map, rebuild_name_map,
 	translator::{ConstExprKind, DefaultTranslator, Translator},
 	truncate_len_from_encoder, ModuleInfo,
 };
@@ -25,7 +25,7 @@ use wasm_encoder::{
 };
 use wasmparser::{
 	CodeSectionReader, ElementItems, ElementKind, ElementSectionReader, ExternalKind, FuncType,
-	FunctionBody, GlobalType, Operator, Type, ValType,
+	FunctionBody, GlobalType, NameSectionReader, Operator, Type, ValType,
 };
 
 /// An interface that describes instruction costs.
@@ -375,6 +375,8 @@ pub fn inject<R: Rules, B: Backend>(
 		}
 	}
 
+	process_custom_section(module_info, gas_func_idx)?;
+
 	if error {
 		return Err(anyhow!("inject fail"));
 	}
@@ -385,6 +387,72 @@ pub fn inject<R: Rules, B: Backend>(
 		}
 	}
 	Ok(module_info.bytes())
+}
+
+fn process_custom_section(module_info: &mut ModuleInfo, gas_func_idx: u32) -> Result<()> {
+	if let Some(custom_section) = module_info.raw_sections.get_mut(&SectionId::Custom.into()) {
+		let mut name_section_builder = wasm_encoder::NameSection::new();
+		let name_sec_reader = NameSectionReader::new(&custom_section.data, 0);
+
+		for item in name_sec_reader {
+			match item? {
+				wasmparser::Name::Function(name_map) => {
+					let mut new_map = wasm_encoder::NameMap::new();
+					for naming in name_map.into_iter() {
+						let naming = naming?;
+						let idx = if naming.index >= gas_func_idx {
+							naming.index + 1
+						} else {
+							naming.index
+						};
+						new_map.append(idx, naming.name);
+					}
+					name_section_builder.functions(&new_map);
+				},
+				wasmparser::Name::Local(local) => {
+					let map = rebuild_indirect_name_map(local)?;
+					name_section_builder.locals(&map);
+				},
+				wasmparser::Name::Label(label) => {
+					let map = rebuild_indirect_name_map(label)?;
+					name_section_builder.labels(&map);
+				},
+				wasmparser::Name::Type(types) => {
+					let map = rebuild_name_map(types)?;
+					name_section_builder.types(&map);
+				},
+				wasmparser::Name::Data(data) => {
+					let map = rebuild_name_map(data)?;
+					name_section_builder.data(&map);
+				},
+				wasmparser::Name::Table(table) => {
+					let map = rebuild_name_map(table)?;
+					name_section_builder.tables(&map);
+				},
+				wasmparser::Name::Memory(memory) => {
+					let map = rebuild_name_map(memory)?;
+					name_section_builder.memories(&map);
+				},
+				wasmparser::Name::Global(global) => {
+					let map = rebuild_name_map(global)?;
+					name_section_builder.globals(&map);
+				},
+				wasmparser::Name::Element(element) => {
+					let map = rebuild_name_map(element)?;
+					name_section_builder.elements(&map);
+				},
+				wasmparser::Name::Module { name, .. } => {
+					todo!("Name Module section not supported - {:?}", name);
+				},
+				wasmparser::Name::Unknown { ty, .. } => {
+					todo!("Name Unknown section not supported - {:?}", ty);
+				},
+			}
+		}
+		module_info.replace_section(SectionId::Custom.into(), &name_section_builder.as_custom())?;
+	}
+
+	Ok(())
 }
 
 /// A control flow block is opened with the `block`, `loop`, and `if` instructions and is closed
@@ -400,7 +468,7 @@ pub fn inject<R: Rules, B: Backend>(
 ///   i32.sub
 ///   tee_local 0
 ///   br_if 0
-/// end
+/// endgG
 /// ```
 ///
 /// The start of the block is `i32.const 1`.
