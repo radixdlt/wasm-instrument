@@ -238,17 +238,19 @@ pub fn inject<R: Rules, B: Backend>(
 			let operator_reader = func_body.get_operators_reader()?;
 			for op in operator_reader {
 				let op = op?;
+				let mut instruction: Option<Instruction> = None;
 				if let GasMeter::External { .. } = gas_meter {
 					if let Operator::Call { function_index } = op {
 						if function_index >= gas_func_idx {
-							func_builder.instruction(&Instruction::Call(function_index + 1));
+							instruction = Some(Instruction::Call(function_index + 1));
 						}
-					} else {
-						func_builder.instruction(&DefaultTranslator.translate_op(&op)?);
 					}
-				} else {
-					func_builder.instruction(&DefaultTranslator.translate_op(&op)?);
 				}
+				let instruction = match instruction {
+					Some(instruction) => instruction,
+					None => DefaultTranslator.translate_op(&op)?,
+				};
+				func_builder.instruction(&instruction);
 			}
 
 			if let GasMeter::Internal { .. } = gas_meter {
