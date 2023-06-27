@@ -184,12 +184,13 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 			ElementItems::Functions(func_indexes) => {
 				for item in func_indexes.into_iter() {
 					let func_idx = item.map_err(|err| anyhow!(err))?;
-
 					if let Some(thunk) = replacement_map.get(&func_idx) {
 						let new_func_idx = thunk.idx.ok_or_else(|| {
 							anyhow!("at this point an index must be assigned to each thunk")
 						})?; //resolve thunk func type, this signature should exit
 						functions.push(new_func_idx);
+					} else {
+						functions.push(func_idx);
 					}
 				}
 			},
