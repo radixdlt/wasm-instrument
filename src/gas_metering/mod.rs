@@ -367,7 +367,7 @@ pub fn inject<R: Rules, B: Backend>(
 	if let Some(_) = module_info.raw_sections.get_mut(&SectionId::Start.into()) {
 		if let GasMeter::External { .. } = gas_meter {
 			if let Some(func_idx) = module_info.start_function {
-				if func_idx > gas_func_idx {
+				if func_idx >= gas_func_idx {
 					let start_section = StartSection { function_index: func_idx + 1 };
 					module_info.replace_section(SectionId::Start.into(), &start_section)?;
 				}
