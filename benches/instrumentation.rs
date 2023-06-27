@@ -9,7 +9,7 @@ use std::{
 use wasm_instrument::{
 	gas_metering::{self, host_function, ConstantCostRules},
 	inject_stack_limiter,
-	parity_wasm::{deserialize_buffer, elements::Module},
+	parser::ModuleInfo,
 };
 
 fn fixture_dir() -> PathBuf {
@@ -22,7 +22,7 @@ fn fixture_dir() -> PathBuf {
 
 fn for_fixtures<F, M>(group: &mut BenchmarkGroup<M>, f: F)
 where
-	F: Fn(Module),
+	F: Fn(ModuleInfo),
 	M: Measurement,
 {
 	for entry in read_dir(fixture_dir()).unwrap() {
@@ -30,16 +30,16 @@ where
 		let bytes = read(entry.path()).unwrap();
 		group.throughput(Throughput::Bytes(bytes.len().try_into().unwrap()));
 		group.bench_with_input(entry.file_name().to_str().unwrap(), &bytes, |bench, input| {
-			bench.iter(|| f(deserialize_buffer(input).unwrap()))
+			bench.iter(|| f(ModuleInfo::new(input).unwrap()))
 		});
 	}
 }
 
 fn gas_metering(c: &mut Criterion) {
 	let mut group = c.benchmark_group("Gas Metering");
-	for_fixtures(&mut group, |module| {
+	for_fixtures(&mut group, |mut module| {
 		gas_metering::inject(
-			module,
+			&mut module,
 			host_function::Injector::new("env", "gas"),
 			&ConstantCostRules::default(),
 		)
@@ -49,8 +49,8 @@ fn gas_metering(c: &mut Criterion) {
 
 fn stack_height_limiter(c: &mut Criterion) {
 	let mut group = c.benchmark_group("Stack Height Limiter");
-	for_fixtures(&mut group, |module| {
-		inject_stack_limiter(module, 128).unwrap();
+	for_fixtures(&mut group, |mut module| {
+		inject_stack_limiter(&mut module, 128).unwrap();
 	});
 }
 
