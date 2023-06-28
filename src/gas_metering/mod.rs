@@ -229,15 +229,15 @@ pub fn inject<R: Rules, B: Backend>(
 	// Iterate over module sections and perform needed transformations.
 	// Indexes are needed to be fixed up in `GasMeter::External` case, as it adds an imported
 	// function, which goes to the beginning of the module's functions space.
-	let code = module_info.code_section();
-	if !code.is_empty() {
+	if module_info.func_bodies_count > 0 {
 		let mut code_section_builder = wasm_encoder::CodeSection::new();
-		let code_item_count = code.len();
+		let code_item_count = module_info.func_bodies_count;
 
-		for (func_body, is_last) in code
+		for (func_body, is_last) in module_info
+			.code_section()
 			.into_iter()
 			.enumerate()
-			.map(|(index, item)| (item, index == code_item_count - 1))
+			.map(|(index, item)| (item, index as u32 == code_item_count - 1))
 		{
 			let func_body = func_body;
 			let current_locals = copy_locals(&func_body)?;
@@ -302,12 +302,11 @@ pub fn inject<R: Rules, B: Backend>(
 		module_info.replace_section(SectionId::Code.into(), &code_section_builder)?;
 	}
 
-	let exports = module_info.export_section();
-	if !exports.is_empty() {
+	if module_info.exports_count > 0 {
 		if let GasMeter::External { .. } = gas_meter {
 			let mut export_sec_builder = ExportSection::new();
 
-			for export in exports {
+			for export in module_info.export_section() {
 				let mut export_index = export.index;
 				if let ExternalKind::Func = export.kind {
 					if export_index >= gas_func_idx {
@@ -375,7 +374,7 @@ pub fn inject<R: Rules, B: Backend>(
 		}
 	}
 
-	if let Some(_) = module_info.raw_sections.get_mut(&SectionId::Start.into()) {
+	if module_info.raw_sections.get_mut(&SectionId::Start.into()).is_some() {
 		if let GasMeter::External { .. } = gas_meter {
 			if let Some(func_idx) = module_info.start_function {
 				if func_idx >= gas_func_idx {
