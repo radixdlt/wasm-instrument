@@ -24,8 +24,8 @@ use wasm_encoder::{
 	Instruction, SectionId, StartSection,
 };
 use wasmparser::{
-	CodeSectionReader, ElementItems, ElementKind, ElementSectionReader, ExternalKind, FuncType,
-	FunctionBody, GlobalType, Operator, Type, ValType,
+	ElementItems, ElementKind, ElementSectionReader, ExternalKind, FuncType, FunctionBody,
+	GlobalType, Operator, Type, ValType,
 };
 
 /// An interface that describes instruction costs.
@@ -229,17 +229,17 @@ pub fn inject<R: Rules, B: Backend>(
 	// Iterate over module sections and perform needed transformations.
 	// Indexes are needed to be fixed up in `GasMeter::External` case, as it adds an imported
 	// function, which goes to the beginning of the module's functions space.
-	if let Some(code_section) = module_info.raw_sections.get_mut(&SectionId::Code.into()) {
+	let code = module_info.code_section();
+	if !code.is_empty() {
 		let mut code_section_builder = wasm_encoder::CodeSection::new();
-		let code_sec_reader = CodeSectionReader::new(&code_section.data, 0)?;
-		let code_item_count = code_sec_reader.count();
+		let code_item_count = code.len();
 
-		for (func_body, is_last) in code_sec_reader
+		for (func_body, is_last) in code
 			.into_iter()
 			.enumerate()
-			.map(|(index, item)| (item, index as u32 == code_item_count - 1))
+			.map(|(index, item)| (item, index == code_item_count - 1))
 		{
-			let func_body = func_body?;
+			let func_body = func_body;
 			let current_locals = copy_locals(&func_body)?;
 
 			let locals_count = current_locals.iter().map(|(count, _)| count).sum();
@@ -303,7 +303,7 @@ pub fn inject<R: Rules, B: Backend>(
 	}
 
 	let exports = module_info.export_section();
-	if exports.len() > 0 {
+	if !exports.is_empty() {
 		if let GasMeter::External { .. } = gas_meter {
 			let mut export_sec_builder = ExportSection::new();
 
@@ -803,7 +803,6 @@ fn insert_metering_calls(
 mod tests {
 	use super::*;
 	use wasm_encoder::{BlockType, Encode, Instruction::*};
-	use wasmparser::FunctionBody;
 
 	fn check_expect_function_body(
 		raw_wasm: &[u8],
@@ -816,13 +815,9 @@ mod tests {
 	}
 
 	fn get_function_body(raw_wasm: &[u8], index: usize) -> Vec<u8> {
-		let mut module = ModuleInfo::new(raw_wasm).unwrap();
-		let func_sec = module.raw_sections.get_mut(&SectionId::Code.into()).unwrap();
-		let func_bodies = wasmparser::CodeSectionReader::new(&func_sec.data, 0)
-			.unwrap()
-			.into_iter()
-			.collect::<wasmparser::Result<Vec<FunctionBody>>>()
-			.unwrap();
+		let module = ModuleInfo::new(raw_wasm).unwrap();
+		let func_sec = module.raw_sections.get(&SectionId::Code.into()).unwrap();
+		let func_bodies = module.code_section();
 
 		let func_body = func_bodies
 			.get(index)
@@ -833,13 +828,8 @@ mod tests {
 	}
 
 	fn get_function_operators(raw_wasm: &[u8], index: usize) -> Vec<Instruction> {
-		let mut module = ModuleInfo::new(raw_wasm).unwrap();
-		let func_sec = module.raw_sections.get_mut(&SectionId::Code.into()).unwrap();
-		let func_bodies = wasmparser::CodeSectionReader::new(&func_sec.data, 0)
-			.unwrap()
-			.into_iter()
-			.collect::<wasmparser::Result<Vec<FunctionBody>>>()
-			.unwrap();
+		let module = ModuleInfo::new(raw_wasm).unwrap();
+		let func_bodies = module.code_section();
 
 		let func_body = func_bodies
 			.get(index)

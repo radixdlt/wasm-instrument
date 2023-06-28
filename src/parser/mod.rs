@@ -8,9 +8,10 @@ use core::ops::Range;
 use paste::paste;
 use wasm_encoder::{Encode, ExportKind, SectionId};
 use wasmparser::{
-	Chunk, Export, ExportSectionReader, ExternalKind, FunctionSectionReader, Global,
-	GlobalSectionReader, GlobalType, Import, ImportSectionReader, IndirectNameMap,
-	MemorySectionReader, MemoryType, NameMap, NameSectionReader, Parser, Payload, TableType, Type,
+	Chunk, CodeSectionReader, Export, ExportSectionReader, ExternalKind, FunctionBody,
+	FunctionSectionReader, Global, GlobalSectionReader, GlobalType, Import, ImportSectionReader,
+	IndirectNameMap, MemorySectionReader, MemoryType, NameMap, NameSectionReader, Parser, Payload,
+	Table, TableSectionReader, TableType, Type,
 };
 
 #[derive(Clone, Debug)]
@@ -529,12 +530,12 @@ impl ModuleInfo {
 	add_section_function!(Import, Import);
 	add_section_function!(Function, u32);
 	add_section_function!(Memory, MemoryType);
+	add_section_function!(Table, Table);
+	add_section_function!(Code, FunctionBody);
 }
 
 // Then insert metering calls into a sequence of instructions given the block locations and costs.
-pub fn copy_locals(
-	func_body: &wasmparser::FunctionBody,
-) -> Result<Vec<(u32, wasm_encoder::ValType)>> {
+pub fn copy_locals(func_body: &FunctionBody) -> Result<Vec<(u32, wasm_encoder::ValType)>> {
 	let mut local_reader = func_body.get_locals_reader()?;
 	// Get current locals and map to encoder types
 	let current_locals: Vec<(u32, wasm_encoder::ValType)> = (0..local_reader.get_count())

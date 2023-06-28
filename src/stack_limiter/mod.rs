@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use wasm_encoder::{
 	CodeSection, ConstExpr, Function, GlobalSection, GlobalType, SectionId, ValType,
 };
-use wasmparser::{CodeSectionReader, FunctionBody, Operator};
+use wasmparser::{FunctionBody, Operator};
 
 /// Macro to generate preamble and postamble.
 macro_rules! instrument_call {
@@ -176,19 +176,9 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32> {
 		.checked_sub(func_imports)
 		.ok_or_else(|| anyhow!("this should be a index of a defined function"))?;
 
-	let code_section_reader = CodeSectionReader::new(
-		&module
-			.raw_sections
-			.get(&SectionId::Code.into())
-			.ok_or_else(|| anyhow!("not find code section"))?
-			.data,
-		0,
-	)?;
-
 	// get_locals_reader() returns iterator over local types
-	let local_reader = code_section_reader
-		.into_iter()
-		.collect::<wasmparser::Result<Vec<FunctionBody>>>()?
+	let local_reader = module
+		.code_section()
 		.get(defined_func_idx as usize)
 		.ok_or_else(|| anyhow!("function body is out of bounds"))?
 		.get_locals_reader()?;
@@ -212,12 +202,10 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32> {
 
 fn instrument_functions(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()> {
 	let mut code_builder = CodeSection::new();
-	if let Some(code_sec) = module.raw_sections.get(&SectionId::Code.into()) {
-		let function_sec_reader = CodeSectionReader::new(&code_sec.data, 0)?;
-		for body in function_sec_reader {
-			let body_encoder = instrument_function(ctx, body?)?;
-			code_builder.function(&body_encoder);
-		}
+
+	for body in module.code_section() {
+		let body_encoder = instrument_function(ctx, body)?;
+		code_builder.function(&body_encoder);
 	}
 	module.replace_section(SectionId::Code.into(), &code_builder)
 }

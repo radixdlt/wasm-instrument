@@ -2,8 +2,7 @@ use alloc::vec::Vec;
 
 use crate::parser::ModuleInfo;
 use anyhow::{anyhow, Result};
-use wasm_encoder::SectionId;
-use wasmparser::{BlockType, CodeSectionReader, Type};
+use wasmparser::{BlockType, Type};
 
 // The cost in stack items that should be charged per call of a function. This is
 // is a static cost that is added to each function call. This makes sense because even
@@ -134,15 +133,6 @@ impl Stack {
 pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 	use wasmparser::Operator::*;
 
-	let code_section = CodeSectionReader::new(
-		&module
-			.raw_sections
-			.get(&SectionId::Code.into())
-			.ok_or_else(|| anyhow!("no code section"))?
-			.data,
-		0,
-	)?;
-
 	// Get a signature and a body of the specified function.
 	let wasmparser::Type::Func(func_signature) =
 		module.get_functype_idx(module.imported_functions_count + func_idx)?
@@ -150,11 +140,11 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 		// TODO: Type::Array(_)
 		todo!("Array type not supported yet");
 	};
-	let body = code_section
-		.into_iter()
-		.nth(func_idx as usize)
-		.ok_or_else(|| anyhow!("function body for the index isn't found"))??;
-	let mut body_reader = body.get_operators_reader()?;
+	let mut body_reader = module
+		.code_section()
+		.get(func_idx as usize)
+		.ok_or_else(|| anyhow!("function body for the index isn't found"))?
+		.get_operators_reader()?;
 	let mut stack = Stack::new();
 	let mut max_height: u32 = 0;
 

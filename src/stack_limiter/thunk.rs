@@ -14,8 +14,8 @@ use wasm_encoder::{
 	FunctionSection, SectionId,
 };
 use wasmparser::{
-	CodeSectionReader, Element, ElementItems, ElementKind, ElementSectionReader, ExternalKind,
-	FuncType, Result as WasmParserResult, Type,
+	Element, ElementItems, ElementKind, ElementSectionReader, ExternalKind, FuncType,
+	Result as WasmParserResult, Type,
 };
 
 struct Thunk {
@@ -95,15 +95,9 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 
 	// Save current func_idx
 	let mut func_body_sec_builder = CodeSection::new();
-	let func_body_sec_data = &module_info
-		.raw_sections
-		.get(&SectionId::Code.into())
-		.ok_or_else(|| anyhow!("no function body"))?
-		.data;
 
-	let code_sec_reader = CodeSectionReader::new(func_body_sec_data, 0)?;
-	for func_body in code_sec_reader {
-		DefaultTranslator.translate_code(func_body?, &mut func_body_sec_builder)?;
+	for func_body in module_info.code_section() {
+		DefaultTranslator.translate_code(func_body, &mut func_body_sec_builder)?;
 	}
 
 	let mut func_sec_builder = FunctionSection::new();
