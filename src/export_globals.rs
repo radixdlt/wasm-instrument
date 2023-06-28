@@ -14,19 +14,21 @@ pub fn export_mutable_globals(module_info: &mut ModuleInfo, prefix: &str) {
 	let mutable_globals_to_export = module_info
 		.global_section()
 		.unwrap()
-		.into_iter()
 		.enumerate()
-		.filter_map(|(index, global)| if global.ty.mutable { Some(index as u32) } else { None })
+		.filter_map(
+			|(index, global)| if global.unwrap().ty.mutable { Some(index as u32) } else { None },
+		)
 		.collect::<Vec<u32>>();
-
-	let exports = module_info.export_section().unwrap();
 
 	let mut export_sec_builder = ExportSection::new();
 
-	// Recreate current export section
-	for export in exports {
-		let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
-		export_sec_builder.export(export.name, export_kind, export.index);
+	if let Some(exports) = module_info.export_section() {
+		// Recreate current export section
+		for export in exports {
+			let export = export.unwrap();
+			let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
+			export_sec_builder.export(export.name, export_kind, export.index);
+		}
 	}
 
 	// Add mutable globals to the export section

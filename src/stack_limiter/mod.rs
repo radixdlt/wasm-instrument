@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use wasm_encoder::{
 	CodeSection, ConstExpr, Function, GlobalSection, GlobalType, SectionId, ValType,
 };
-use wasmparser::{CodeSectionReader, FunctionBody, GlobalSectionReader, Operator};
+use wasmparser::{CodeSectionReader, FunctionBody, Operator};
 
 /// Macro to generate preamble and postamble.
 macro_rules! instrument_call {
@@ -132,11 +132,11 @@ pub fn inject(module_info: &mut ModuleInfo, stack_limit: u32) -> Result<Vec<u8>>
 /// Generate a new global that will be used for tracking current stack height.
 fn generate_stack_height_global(module: &mut ModuleInfo) -> Result<u32> {
 	let mut global_sec_builder = GlobalSection::new();
-	let index = if let Some(global_sec) = &module.raw_sections.get(&SectionId::Global.into()) {
-		let reader = GlobalSectionReader::new(&global_sec.data, 0)?;
-		let count = reader.count();
-		for global in reader {
+	let index = if let Some(global_sec) = module.global_section() {
+		let mut count = 0;
+		for global in global_sec {
 			DefaultTranslator.translate_global(global?, &mut global_sec_builder)?;
+			count += 1;
 		}
 		count
 	} else {

@@ -9,7 +9,7 @@ use wasm_encoder::{Encode, ExportKind, SectionId};
 use wasmparser::{
 	Chunk, Export, ExportSectionReader, ExternalKind, Global, GlobalSectionReader, GlobalType,
 	IndirectNameMap, MemoryType, NameMap, NameSectionReader, Parser, Payload,
-	Result as WasmParserResult, TableType, Type,
+	SectionLimitedIntoIter, TableType, Type,
 };
 
 #[derive(Clone, Debug)]
@@ -308,11 +308,9 @@ impl ModuleInfo {
 	pub fn add_export(&mut self, name: &str, kind: ExportKind, index: u32) -> Result<()> {
 		let mut section_builder = wasm_encoder::ExportSection::new();
 
-		if let Some(section) = self.raw_sections.get(&SectionId::Export.into()) {
-			let section_reader = wasmparser::ExportSectionReader::new(&section.data, 0)?;
-
-			for section_item in section_reader {
-				let export = section_item?;
+		if let Some(exports) = self.export_section() {
+			for export in exports {
+				let export = export?;
 				let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
 				section_builder.export(export.name, export_kind, export.index);
 			}
@@ -518,25 +516,23 @@ impl ModuleInfo {
 	}
 
 	#[allow(dead_code)]
-	pub fn export_section(&self) -> Result<Vec<Export>> {
-		let export = match self.raw_sections.get(&SectionId::Export.into()) {
-			Some(raw_sec) => ExportSectionReader::new(&raw_sec.data, 0)?
-				.into_iter()
-				.collect::<WasmParserResult<Vec<Export>>>()?,
-			None => vec![],
-		};
-		Ok(export)
+	pub fn export_section(&self) -> Option<SectionLimitedIntoIter<Export>> {
+		let section = self.raw_sections.get(&SectionId::Export.into())?;
+
+		match ExportSectionReader::new(&section.data, 0) {
+			Ok(reader) => Some(reader.into_iter()),
+			Err(_) => None,
+		}
 	}
 
 	#[allow(dead_code)]
-	pub fn global_section(&self) -> Result<Vec<Global>> {
-		let global = match self.raw_sections.get(&SectionId::Global.into()) {
-			Some(raw_sec) => GlobalSectionReader::new(&raw_sec.data, 0)?
-				.into_iter()
-				.collect::<WasmParserResult<Vec<Global>>>()?,
-			None => vec![],
-		};
-		Ok(global)
+	pub fn global_section(&self) -> Option<SectionLimitedIntoIter<Global>> {
+		let section = self.raw_sections.get(&SectionId::Global.into())?;
+
+		match GlobalSectionReader::new(&section.data, 0) {
+			Ok(reader) => Some(reader.into_iter()),
+			Err(_) => None,
+		}
 	}
 }
 
