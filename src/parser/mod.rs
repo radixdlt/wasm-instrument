@@ -7,9 +7,9 @@ use anyhow::{anyhow, Result};
 use core::ops::Range;
 use wasm_encoder::{Encode, ExportKind, SectionId};
 use wasmparser::{
-	Chunk, Export, ExportSectionReader, ExternalKind, Global, GlobalSectionReader, GlobalType,
-	IndirectNameMap, MemoryType, NameMap, NameSectionReader, Parser, Payload,
-	SectionLimitedIntoIter, TableType, Type,
+	Chunk, Export, ExportSectionReader, ExternalKind, FunctionSectionReader, Global,
+	GlobalSectionReader, GlobalType, Import, ImportSectionReader, IndirectNameMap, MemoryType,
+	NameMap, NameSectionReader, Parser, Payload, SectionLimitedIntoIter, TableType, Type,
 };
 
 #[derive(Clone, Debug)]
@@ -351,11 +351,9 @@ impl ModuleInfo {
 		// Recreate Function section
 		let mut section_builder = wasm_encoder::FunctionSection::new();
 
-		if let Some(section) = self.raw_sections.get(&SectionId::Function.into()) {
-			let section_reader = wasmparser::FunctionSectionReader::new(&section.data, 0)?;
-
-			for section_item in section_reader {
-				section_builder.function(section_item?);
+		if let Some(functions) = self.function_section() {
+			for function in functions {
+				section_builder.function(function?);
 			}
 		}
 		// Define a new function in Function section
@@ -389,9 +387,8 @@ impl ModuleInfo {
 
 		// Recreate Import section
 		let mut import_decoder = wasm_encoder::ImportSection::new();
-		if let Some(import_sec) = self.raw_sections.get_mut(&SectionId::Import.into()) {
-			let import_sec_reader = wasmparser::ImportSectionReader::new(&import_sec.data, 0)?;
-			for import in import_sec_reader {
+		if let Some(imports) = self.import_section() {
+			for import in imports {
 				DefaultTranslator.translate_import(import?, &mut import_decoder)?;
 			}
 		}
@@ -410,9 +407,8 @@ impl ModuleInfo {
 		global_type: GlobalType,
 	) -> Result<()> {
 		let mut import_decoder = wasm_encoder::ImportSection::new();
-		if let Some(import_sec) = self.raw_sections.get_mut(&SectionId::Import.into()) {
-			let import_sec_reader = wasmparser::ImportSectionReader::new(&import_sec.data, 0)?;
-			for import in import_sec_reader {
+		if let Some(imports) = self.import_section() {
+			for import in imports {
 				DefaultTranslator.translate_import(import?, &mut import_decoder)?;
 			}
 		}
@@ -530,6 +526,26 @@ impl ModuleInfo {
 		let section = self.raw_sections.get(&SectionId::Global.into())?;
 
 		match GlobalSectionReader::new(&section.data, 0) {
+			Ok(reader) => Some(reader.into_iter()),
+			Err(_) => None,
+		}
+	}
+
+	#[allow(dead_code)]
+	pub fn import_section(&self) -> Option<SectionLimitedIntoIter<Import>> {
+		let section = self.raw_sections.get(&SectionId::Import.into())?;
+
+		match ImportSectionReader::new(&section.data, 0) {
+			Ok(reader) => Some(reader.into_iter()),
+			Err(_) => None,
+		}
+	}
+
+	#[allow(dead_code)]
+	pub fn function_section(&self) -> Option<SectionLimitedIntoIter<u32>> {
+		let section = self.raw_sections.get(&SectionId::Function.into())?;
+
+		match FunctionSectionReader::new(&section.data, 0) {
 			Ok(reader) => Some(reader.into_iter()),
 			Err(_) => None,
 		}
