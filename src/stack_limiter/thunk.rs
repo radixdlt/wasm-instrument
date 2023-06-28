@@ -13,10 +13,7 @@ use wasm_encoder::{
 	CodeSection, ElementMode, ElementSection, ElementSegment, Elements, ExportSection,
 	FunctionSection, SectionId,
 };
-use wasmparser::{
-	Element, ElementItems, ElementKind, ElementSectionReader, ExternalKind, FuncType,
-	Result as WasmParserResult, Type,
-};
+use wasmparser::{ElementItems, ElementKind, ExternalKind, FuncType, Type};
 
 struct Thunk {
 	signature: FuncType,
@@ -30,12 +27,7 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 	let exports = module_info.export_section();
 
 	//element maybe null
-	let elements = match module_info.raw_sections.get(&SectionId::Element.into()) {
-		Some(v) => ElementSectionReader::new(&v.data, 0)?
-			.into_iter()
-			.collect::<WasmParserResult<Vec<Element>>>()?,
-		None => vec![],
-	};
+	let elements = module_info.element_section();
 
 	let mut replacement_map: Map<u32, Thunk> = {
 		let exported_func_indices = exports.iter().filter_map(|entry| match entry.kind {

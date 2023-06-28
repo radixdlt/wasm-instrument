@@ -8,10 +8,10 @@ use core::ops::Range;
 use paste::paste;
 use wasm_encoder::{Encode, ExportKind, SectionId};
 use wasmparser::{
-	Chunk, CodeSectionReader, Export, ExportSectionReader, ExternalKind, FunctionBody,
-	FunctionSectionReader, Global, GlobalSectionReader, GlobalType, Import, ImportSectionReader,
-	IndirectNameMap, MemorySectionReader, MemoryType, NameMap, NameSectionReader, Parser, Payload,
-	Table, TableSectionReader, TableType, Type,
+	Chunk, CodeSectionReader, Element, ElementSectionReader, Export, ExportSectionReader,
+	ExternalKind, FunctionBody, FunctionSectionReader, Global, GlobalSectionReader, GlobalType,
+	Import, ImportSectionReader, IndirectNameMap, MemorySectionReader, MemoryType, NameMap,
+	NameSectionReader, Parser, Payload, Table, TableSectionReader, TableType, Type,
 };
 
 #[derive(Clone, Debug)]
@@ -532,6 +532,7 @@ impl ModuleInfo {
 	add_section_function!(Memory, MemoryType);
 	add_section_function!(Table, Table);
 	add_section_function!(Code, FunctionBody);
+	add_section_function!(Element, Element);
 }
 
 // Then insert metering calls into a sequence of instructions given the block locations and costs.

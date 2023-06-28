@@ -24,8 +24,8 @@ use wasm_encoder::{
 	Instruction, SectionId, StartSection,
 };
 use wasmparser::{
-	ElementItems, ElementKind, ElementSectionReader, ExternalKind, FuncType, FunctionBody,
-	GlobalType, Operator, Type, ValType,
+	ElementItems, ElementKind, ExternalKind, FuncType, FunctionBody, GlobalType, Operator, Type,
+	ValType,
 };
 
 /// An interface that describes instruction costs.
@@ -326,15 +326,13 @@ pub fn inject<R: Rules, B: Backend>(
 		}
 	}
 
-	if let Some(ele_section) = module_info.raw_sections.get_mut(&SectionId::Element.into()) {
+	if module_info.elements_count > 0 {
 		// Note that we do not need to check the element type referenced because in the
 		// WebAssembly 1.0 spec, the only allowed element type is funcref.
 		if let GasMeter::External { .. } = gas_meter {
 			let mut ele_sec_builder = ElementSection::new();
-			let ele_sec_reader = ElementSectionReader::new(&ele_section.data, 0)?;
 
-			for elem in ele_sec_reader {
-				let elem = elem?;
+			for elem in module_info.element_section() {
 				let mut functions = vec![];
 				if let ElementItems::Functions(func_indexes) = elem.items {
 					for func_idx in func_indexes {
