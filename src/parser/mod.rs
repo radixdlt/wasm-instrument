@@ -5,11 +5,13 @@ use crate::parser::translator::{DefaultTranslator, Translator};
 use alloc::collections::{BTreeMap, BTreeSet};
 use anyhow::{anyhow, Result};
 use core::ops::Range;
+use paste::paste;
 use wasm_encoder::{Encode, ExportKind, SectionId};
 use wasmparser::{
 	Chunk, Export, ExportSectionReader, ExternalKind, FunctionSectionReader, Global,
-	GlobalSectionReader, GlobalType, Import, ImportSectionReader, IndirectNameMap, MemoryType,
-	NameMap, NameSectionReader, Parser, Payload, SectionLimitedIntoIter, TableType, Type,
+	GlobalSectionReader, GlobalType, Import, ImportSectionReader, IndirectNameMap,
+	MemorySectionReader, MemoryType, NameMap, NameSectionReader, Parser, Payload,
+	SectionLimitedIntoIter, TableType, Type,
 };
 
 #[derive(Clone, Debug)]
@@ -81,6 +83,22 @@ pub struct ModuleInfo {
 	// raw_sections
 	pub raw_sections: BTreeMap<u8, RawSection>,
 	pub component_raw_sections: BTreeMap<u8, RawSection>,
+}
+
+macro_rules! add_section_function {
+	($name:ident, $ty:expr) => {
+		paste! {
+			#[allow(dead_code)]
+			pub fn [< $name:lower _section>](&self) -> Option<SectionLimitedIntoIter<$ty>> {
+				let section = self.raw_sections.get(&SectionId::$name.into())?;
+
+				match [< $name SectionReader >]::new(&section.data, 0) {
+					Ok(reader) => Some(reader.into_iter()),
+					Err(_) => None,
+				}
+			}
+		}
+	};
 }
 
 impl ModuleInfo {
@@ -511,45 +529,11 @@ impl ModuleInfo {
 		self.exports_global_count
 	}
 
-	#[allow(dead_code)]
-	pub fn export_section(&self) -> Option<SectionLimitedIntoIter<Export>> {
-		let section = self.raw_sections.get(&SectionId::Export.into())?;
-
-		match ExportSectionReader::new(&section.data, 0) {
-			Ok(reader) => Some(reader.into_iter()),
-			Err(_) => None,
-		}
-	}
-
-	#[allow(dead_code)]
-	pub fn global_section(&self) -> Option<SectionLimitedIntoIter<Global>> {
-		let section = self.raw_sections.get(&SectionId::Global.into())?;
-
-		match GlobalSectionReader::new(&section.data, 0) {
-			Ok(reader) => Some(reader.into_iter()),
-			Err(_) => None,
-		}
-	}
-
-	#[allow(dead_code)]
-	pub fn import_section(&self) -> Option<SectionLimitedIntoIter<Import>> {
-		let section = self.raw_sections.get(&SectionId::Import.into())?;
-
-		match ImportSectionReader::new(&section.data, 0) {
-			Ok(reader) => Some(reader.into_iter()),
-			Err(_) => None,
-		}
-	}
-
-	#[allow(dead_code)]
-	pub fn function_section(&self) -> Option<SectionLimitedIntoIter<u32>> {
-		let section = self.raw_sections.get(&SectionId::Function.into())?;
-
-		match FunctionSectionReader::new(&section.data, 0) {
-			Ok(reader) => Some(reader.into_iter()),
-			Err(_) => None,
-		}
-	}
+	add_section_function!(Export, Export);
+	add_section_function!(Global, Global);
+	add_section_function!(Import, Import);
+	add_section_function!(Function, u32);
+	add_section_function!(Memory, MemoryType);
 }
 
 // Then insert metering calls into a sequence of instructions given the block locations and costs.
