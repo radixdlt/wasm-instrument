@@ -440,6 +440,23 @@ impl ModuleInfo {
 		self.replace_section(SectionId::Import.into(), &import_decoder)
 	}
 
+	pub fn modify_memory_type(&mut self, mem_index: u32, mem_type: MemoryType) -> Result<()> {
+		let mut memory_builder = wasm_encoder::MemorySection::new();
+		let mut memory_types = vec![];
+		for (index, memory) in self.memory_section().iter().enumerate() {
+			let encoded_mem_type = if index as u32 != mem_index {
+				memory_types.push(*memory);
+				DefaultTranslator.translate_memory_type(memory)?
+			} else {
+				memory_types.push(mem_type);
+				DefaultTranslator.translate_memory_type(&mem_type)?
+			};
+			memory_builder.memory(encoded_mem_type);
+		}
+		self.memory_types = memory_types;
+		self.replace_section(SectionId::Memory.into(), &memory_builder)
+	}
+
 	pub fn bytes(&self) -> Vec<u8> {
 		let mut module = wasm_encoder::Module::new();
 		for s in self.raw_sections.values() {
