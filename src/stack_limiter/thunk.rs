@@ -14,8 +14,8 @@ use wasm_encoder::{
 	FunctionSection, SectionId,
 };
 use wasmparser::{
-	CodeSectionReader, Element, ElementItems, ElementKind, ElementSectionReader, Export,
-	ExportSectionReader, ExternalKind, FuncType, Result as WasmParserResult, Type,
+	CodeSectionReader, Element, ElementItems, ElementKind, ElementSectionReader, ExternalKind,
+	FuncType, Result as WasmParserResult, Type,
 };
 
 struct Thunk {
@@ -27,12 +27,7 @@ struct Thunk {
 
 pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Result<()> {
 	// First, we need to collect all function indices that should be replaced by thunks
-	let exports = match module_info.raw_sections.get(&SectionId::Export.into()) {
-		Some(raw_sec) => ExportSectionReader::new(&raw_sec.data, 0)?
-			.into_iter()
-			.collect::<WasmParserResult<Vec<Export>>>()?,
-		None => vec![],
-	};
+	let exports = module_info.export_section();
 
 	//element maybe null
 	let elements = match module_info.raw_sections.get(&SectionId::Element.into()) {
@@ -113,10 +108,8 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 
 	let mut func_sec_builder = FunctionSection::new();
 
-	if let Some(functions) = module_info.function_section() {
-		for func_body in functions {
-			func_sec_builder.function(func_body?);
-		}
+	for func_body in module_info.function_section() {
+		func_sec_builder.function(func_body);
 	}
 
 	let mut next_func_idx = module_info.function_map.len() as u32;

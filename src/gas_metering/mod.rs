@@ -302,12 +302,12 @@ pub fn inject<R: Rules, B: Backend>(
 		module_info.replace_section(SectionId::Code.into(), &code_section_builder)?;
 	}
 
-	if let Some(exports) = module_info.export_section() {
+	let exports = module_info.export_section();
+	if exports.len() > 0 {
 		if let GasMeter::External { .. } = gas_meter {
 			let mut export_sec_builder = ExportSection::new();
 
 			for export in exports {
-				let export = export?;
 				let mut export_index = export.index;
 				if let ExternalKind::Func = export.kind {
 					if export_index >= gas_func_idx {

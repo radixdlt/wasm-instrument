@@ -132,15 +132,12 @@ pub fn inject(module_info: &mut ModuleInfo, stack_limit: u32) -> Result<Vec<u8>>
 /// Generate a new global that will be used for tracking current stack height.
 fn generate_stack_height_global(module: &mut ModuleInfo) -> Result<u32> {
 	let mut global_sec_builder = GlobalSection::new();
-	let index = if let Some(global_sec) = module.global_section() {
-		let mut count = 0;
-		for global in global_sec {
-			DefaultTranslator.translate_global(global?, &mut global_sec_builder)?;
-			count += 1;
+	let index = {
+		let global_sec = module.global_section();
+		for global in &global_sec {
+			DefaultTranslator.translate_global(*global, &mut global_sec_builder)?;
 		}
-		count
-	} else {
-		0
+		global_sec.len() as u32
 	};
 
 	global_sec_builder

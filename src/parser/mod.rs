@@ -10,8 +10,7 @@ use wasm_encoder::{Encode, ExportKind, SectionId};
 use wasmparser::{
 	Chunk, Export, ExportSectionReader, ExternalKind, FunctionSectionReader, Global,
 	GlobalSectionReader, GlobalType, Import, ImportSectionReader, IndirectNameMap,
-	MemorySectionReader, MemoryType, NameMap, NameSectionReader, Parser, Payload,
-	SectionLimitedIntoIter, TableType, Type,
+	MemorySectionReader, MemoryType, NameMap, NameSectionReader, Parser, Payload, TableType, Type,
 };
 
 #[derive(Clone, Debug)]
@@ -89,13 +88,17 @@ macro_rules! add_section_function {
 	($name:ident, $ty:expr) => {
 		paste! {
 			#[allow(dead_code)]
-			pub fn [< $name:lower _section>](&self) -> Option<SectionLimitedIntoIter<$ty>> {
-				let section = self.raw_sections.get(&SectionId::$name.into())?;
+			pub fn [< $name:lower _section>](&self) -> Vec<$ty> {
 
-				match [< $name SectionReader >]::new(&section.data, 0) {
-					Ok(reader) => Some(reader.into_iter()),
-					Err(_) => None,
+				if let Some(section) =  self.raw_sections.get(&SectionId::$name.into()) {
+					if let Ok(reader) = [< $name SectionReader >]::new(&section.data, 0) {
+						// Assuming the module has already been validated and no errors shall occur
+						// when iterating the items
+						return reader.into_iter().filter_map(|x| x.ok()).collect::<Vec<$ty>>();
+					}
 				}
+
+				return vec![];
 			}
 		}
 	};
@@ -326,12 +329,9 @@ impl ModuleInfo {
 	pub fn add_export(&mut self, name: &str, kind: ExportKind, index: u32) -> Result<()> {
 		let mut section_builder = wasm_encoder::ExportSection::new();
 
-		if let Some(exports) = self.export_section() {
-			for export in exports {
-				let export = export?;
-				let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
-				section_builder.export(export.name, export_kind, export.index);
-			}
+		for export in self.export_section() {
+			let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
+			section_builder.export(export.name, export_kind, export.index);
 		}
 
 		section_builder.export(name, kind, index);
@@ -369,11 +369,10 @@ impl ModuleInfo {
 		// Recreate Function section
 		let mut section_builder = wasm_encoder::FunctionSection::new();
 
-		if let Some(functions) = self.function_section() {
-			for function in functions {
-				section_builder.function(function?);
-			}
+		for function in self.function_section() {
+			section_builder.function(function);
 		}
+
 		// Define a new function in Function section
 		section_builder.function(func_type_index);
 		self.function_map.push(func_type_index);
@@ -405,10 +404,8 @@ impl ModuleInfo {
 
 		// Recreate Import section
 		let mut import_decoder = wasm_encoder::ImportSection::new();
-		if let Some(imports) = self.import_section() {
-			for import in imports {
-				DefaultTranslator.translate_import(import?, &mut import_decoder)?;
-			}
+		for import in self.import_section() {
+			DefaultTranslator.translate_import(import, &mut import_decoder)?;
 		}
 
 		// Define new function import in the Import section.
@@ -425,10 +422,8 @@ impl ModuleInfo {
 		global_type: GlobalType,
 	) -> Result<()> {
 		let mut import_decoder = wasm_encoder::ImportSection::new();
-		if let Some(imports) = self.import_section() {
-			for import in imports {
-				DefaultTranslator.translate_import(import?, &mut import_decoder)?;
-			}
+		for import in self.import_section() {
+			DefaultTranslator.translate_import(import, &mut import_decoder)?;
 		}
 
 		// Define new global import in the Import section.
