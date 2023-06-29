@@ -143,7 +143,6 @@ impl ModuleInfo {
 				Payload::ImportSection(reader) => {
 					info.section(SectionId::Import.into(), reader.range(), input_wasm);
 
-					//for _ in 0..reader.get_count()
 					for import in reader.into_iter() {
 						let import = import?;
 						match import.ty {
@@ -277,9 +276,9 @@ impl ModuleInfo {
 	}
 
 	pub fn resolve_type_idx(&self, t: &Type) -> Option<u32> {
+		let Type::Func(dt) = t else { todo!() };
 		for (index, ty) in self.types_map.iter().enumerate() {
 			let Type::Func(ot) = ty else { todo!() };
-			let Type::Func(dt) = t else { todo!() };
 			if ot.eq(dt) {
 				return Some(index as u32);
 			}
@@ -292,7 +291,7 @@ impl ModuleInfo {
 			None => self.types_map.len() as u32,
 			Some(index) => return Ok(index),
 		};
-		//add new type
+		// Add new type
 		let mut type_builder = wasm_encoder::TypeSection::new();
 		for t in &self.types_map {
 			DefaultTranslator.translate_type_def(t.clone(), &mut type_builder)?;
@@ -304,7 +303,7 @@ impl ModuleInfo {
 	}
 
 	/// Returns the number of globals used by the Wasm binary including imported
-	/// glboals
+	/// globals
 	#[allow(dead_code)]
 	pub fn get_global_count(&self) -> usize {
 		self.global_types.len()
@@ -319,15 +318,6 @@ impl ModuleInfo {
 		self.raw_sections
 			.insert(sec_type, RawSection::new(sec_type, truncate_len_from_encoder(new_section)?));
 		Ok(())
-	}
-
-	pub fn get_count(&mut self, section: SectionId) -> Result<u32> {
-		if let Some(section) = self.raw_sections.get(&section.into()) {
-			let section_reader = wasmparser::ExportSectionReader::new(&section.data, 0)?;
-			Ok(section_reader.count())
-		} else {
-			Err(anyhow!("section not found"))
-		}
 	}
 
 	pub fn add_export(&mut self, name: &str, kind: ExportKind, index: u32) -> Result<()> {
@@ -571,7 +561,7 @@ pub fn copy_locals(func_body: &FunctionBody) -> Result<Vec<(u32, wasm_encoder::V
 	Ok(current_locals)
 }
 
-//todo unable to get function encoder body directly, remove this after option wasmparser
+// TODO unable to get function encoder body directly, remove this after option wasmparser
 pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Result<Vec<u8>> {
 	let mut d = vec![];
 	func_builder.encode(&mut d);
@@ -580,7 +570,7 @@ pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Res
 	Ok(r.read_bytes(size as usize)?.to_vec())
 }
 
-pub fn rebuild_name_map(name_map: NameMap) -> Result<wasm_encoder::NameMap> {
+fn rebuild_name_map(name_map: NameMap) -> Result<wasm_encoder::NameMap> {
 	let mut encoded_map = wasm_encoder::NameMap::new();
 	for naming in name_map {
 		let naming = naming?;
@@ -589,7 +579,7 @@ pub fn rebuild_name_map(name_map: NameMap) -> Result<wasm_encoder::NameMap> {
 	Ok(encoded_map)
 }
 
-pub fn rebuild_indirect_name_map(
+fn rebuild_indirect_name_map(
 	indirect_name_map: IndirectNameMap,
 ) -> Result<wasm_encoder::IndirectNameMap> {
 	let mut encoded_map = wasm_encoder::IndirectNameMap::new();
@@ -602,6 +592,10 @@ pub fn rebuild_indirect_name_map(
 	Ok(encoded_map)
 }
 
+/// - Update function indices in Custom Name section
+///   Increment indices greater or equal than given one (incrementing by 1 because it is assumed one
+///   function has been added before the given index)
+/// - Rebuild remaining section items
 pub fn process_custom_section(
 	module_info: &mut ModuleInfo,
 	update_func_idx: Option<u32>,
