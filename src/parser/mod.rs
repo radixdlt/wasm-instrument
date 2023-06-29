@@ -411,7 +411,14 @@ impl ModuleInfo {
 
 		// Define new function import in the Import section.
 		import_decoder.import(module, func_name, wasm_encoder::EntityType::Function(func_type_idx));
-		self.function_map.push(func_type_idx);
+		// function_map consist of:
+		// - imported function first
+		// - local functions then
+		// This is important when getting function Type by its index get_type_by_func_idx()
+		// When adding an import we make sure it is added as the last imported function
+		// but before local functions
+		self.function_map.insert(self.imported_functions_count as usize, func_type_idx);
+
 		self.imported_functions_count += 1;
 		self.replace_section(SectionId::Import.into(), &import_decoder)
 	}
