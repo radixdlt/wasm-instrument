@@ -12,7 +12,7 @@ use wasmparser::{
 	ExternalKind, FunctionBody, FunctionSectionReader, Global, GlobalSectionReader, GlobalType,
 	Import, ImportSectionReader, IndirectNameMap, MemorySectionReader, MemoryType, NameMap,
 	NameSectionReader, Parser, Payload, Result as WasmParserResult, Table, TableSectionReader,
-	TableType, Type,
+	TableType, Type, Validator, WasmFeatures,
 };
 
 #[derive(Clone, Debug)]
@@ -255,6 +255,15 @@ impl ModuleInfo {
 		}
 
 		Ok(info)
+	}
+
+	/// Validates the WASM binary
+	pub fn validate(&self, features: WasmFeatures) -> Result<()> {
+		// TODO validate_all() creates internal parser and parses the binary again. Rework to validate while parsing
+		Validator::new_with_features(features)
+			.validate_all(&self.bytes())
+			.map(|_| ())
+			.map_err(|err| anyhow!(err))
 	}
 
 	/// Registers a new raw_section in the ModuleInfo
