@@ -10,8 +10,7 @@ use anyhow::{anyhow, Result};
 #[cfg(features = "std")]
 use std::collections::HashMap as Map;
 use wasm_encoder::{
-	CodeSection, ElementMode, ElementSection, ElementSegment, Elements, ExportSection,
-	FunctionSection, SectionId,
+	ElementMode, ElementSection, ElementSegment, Elements, ExportSection, SectionId,
 };
 use wasmparser::{ElementItems, ElementKind, ExternalKind, FuncType, Type};
 
@@ -24,19 +23,17 @@ struct Thunk {
 
 pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Result<()> {
 	// First, we need to collect all function indices that should be replaced by thunks
-	let exports = module_info.export_section()?;
-
-	//element maybe null
-	let elements = module_info.element_section()?;
 
 	let mut replacement_map: Map<u32, Thunk> = {
+		let elements = module_info.element_section()?;
+		let exports = module_info.export_section()?;
 		let exported_func_indices = exports.iter().filter_map(|entry| match entry.kind {
 			ExternalKind::Func => Some(entry.index),
 			_ => None,
 		});
 
 		let mut table_func_indices = vec![];
-		for elem in elements.clone() {
+		for elem in elements {
 			match elem.items {
 				ElementItems::Functions(func_indexes) => {
 					let segment_func_indices: Vec<u32> = func_indexes
@@ -85,20 +82,8 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 
 	// Then, we generate a thunk for each original function.
 
-	// Save current func_idx
-	let mut func_body_sec_builder = CodeSection::new();
-
-	for func_body in module_info.code_section()? {
-		DefaultTranslator.translate_code(func_body, &mut func_body_sec_builder)?;
-	}
-
-	let mut func_sec_builder = FunctionSection::new();
-
-	for func_body in module_info.function_section()? {
-		func_sec_builder.function(func_body);
-	}
-
 	let mut next_func_idx = module_info.function_map.len() as u32;
+	let mut functions = vec![];
 	for (func_idx, thunk) in replacement_map.iter_mut() {
 		// Thunk body consist of:
 		//  - argument pushing
@@ -122,20 +107,18 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 		});
 		thunk_body.instruction(&wasm_encoder::Instruction::End);
 
-		let func_type = module_info
-			.resolve_type_idx(&Type::Func(thunk.signature.clone()))
-			.ok_or_else(|| anyhow!("signature not exit"))?; //resolve thunk func type, this signature should exit
-		func_sec_builder.function(func_type); //add thunk function
-		func_body_sec_builder.function(&thunk_body); //add thunk body
+		functions.push((Type::Func(thunk.signature.clone()), thunk_body));
 
 		thunk.idx = Some(next_func_idx);
 		next_func_idx += 1;
 	}
+	module_info.add_functions(&functions)?;
 
 	// And finally, fixup thunks in export and table sections.
 
 	// Fixup original function index to a index of a thunk generated earlier.
 	let mut export_sec_builder = ExportSection::new();
+	let exports = module_info.export_section()?;
 	for export in exports {
 		let mut function_idx = export.index;
 		if let ExternalKind::Func = export.kind {
@@ -152,7 +135,8 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 	}
 
 	let mut ele_sec_builder = ElementSection::new();
-	for elem in elements.clone() {
+	let elements = module_info.element_section()?;
+	for elem in elements {
 		let mut functions = vec![];
 		match elem.items {
 			ElementItems::Functions(func_indexes) => {
@@ -199,8 +183,6 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 		});
 	}
 
-	module_info.replace_section(SectionId::Function.into(), &func_sec_builder)?;
-	module_info.replace_section(SectionId::Code.into(), &func_body_sec_builder)?;
 	module_info.replace_section(SectionId::Export.into(), &export_sec_builder)?;
 	module_info.replace_section(SectionId::Element.into(), &ele_sec_builder)?;
 	if let Some(start_idx) = module_info.start_function {

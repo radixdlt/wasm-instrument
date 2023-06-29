@@ -366,36 +366,33 @@ impl ModuleInfo {
 		self.replace_section(SectionId::Global.into(), &section_builder)
 	}
 
-	pub fn add_func(&mut self, func_type: Type, func_body: &wasm_encoder::Function) -> Result<()> {
-		let func_type_index = self.add_func_type(&func_type)?;
-
+	/// Add functions specified as a vector of tuples: signature and body
+	pub fn add_functions(&mut self, funcs: &[(Type, wasm_encoder::Function)]) -> Result<()> {
 		// Recreate Function section
-		let mut section_builder = wasm_encoder::FunctionSection::new();
-
+		let mut function_builder = wasm_encoder::FunctionSection::new();
 		for function in self.function_section()? {
-			section_builder.function(function);
+			function_builder.function(function);
 		}
-
-		// Define a new function in Function section
-		section_builder.function(func_type_index);
-		self.function_map.push(func_type_index);
-		self.replace_section(SectionId::Function.into(), &section_builder)?;
 
 		// Recreate Code section
-		let mut section_builder = wasm_encoder::CodeSection::new();
-
-		if let Some(section) = self.raw_sections.get(&SectionId::Code.into()) {
-			let section_reader = wasmparser::CodeSectionReader::new(&section.data, 0)?;
-
-			for section_item in section_reader {
-				DefaultTranslator.translate_code(section_item?, &mut section_builder)?
-			}
+		let mut code_builder = wasm_encoder::CodeSection::new();
+		for funcion_body in self.code_section()? {
+			DefaultTranslator.translate_code(funcion_body, &mut code_builder)?
 		}
 
-		// Write new function body in Code section
-		section_builder.function(func_body);
-		self.func_bodies_count += 1;
-		self.replace_section(SectionId::Code.into(), &section_builder)
+		for (func_type, func_body) in funcs {
+			let func_type_index = self.add_func_type(func_type)?;
+
+			// Define a new function in Function section
+			function_builder.function(func_type_index);
+			self.function_map.push(func_type_index);
+
+			// Write new function body in Code section
+			code_builder.function(func_body);
+			self.func_bodies_count += 1;
+		}
+		self.replace_section(SectionId::Function.into(), &function_builder)?;
+		self.replace_section(SectionId::Code.into(), &code_builder)
 	}
 
 	pub fn add_import_func(

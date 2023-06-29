@@ -210,7 +210,7 @@ pub fn inject<R: Rules, B: Backend>(
 
 			// Inject the local gas function
 			let ty = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
-			module_info.add_func(ty, func)?;
+			module_info.add_functions(&[(ty, func.clone())])?;
 
 			(
 				// Don't inject counters to the local gas function, which is the last one as
@@ -393,7 +393,7 @@ pub fn inject<R: Rules, B: Backend>(
 
 	if need_grow_counter {
 		if let Some((func, grow_counter_func)) = generate_grow_counter(rules, gas_func_idx) {
-			module_info.add_func(func, &grow_counter_func)?;
+			module_info.add_functions(&[(func, grow_counter_func)])?;
 		}
 	}
 	Ok(module_info.bytes())
