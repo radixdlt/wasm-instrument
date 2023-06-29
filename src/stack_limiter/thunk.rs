@@ -24,10 +24,10 @@ struct Thunk {
 
 pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Result<()> {
 	// First, we need to collect all function indices that should be replaced by thunks
-	let exports = module_info.export_section();
+	let exports = module_info.export_section()?;
 
 	//element maybe null
-	let elements = module_info.element_section();
+	let elements = module_info.element_section()?;
 
 	let mut replacement_map: Map<u32, Thunk> = {
 		let exported_func_indices = exports.iter().filter_map(|entry| match entry.kind {
@@ -88,13 +88,13 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 	// Save current func_idx
 	let mut func_body_sec_builder = CodeSection::new();
 
-	for func_body in module_info.code_section() {
+	for func_body in module_info.code_section()? {
 		DefaultTranslator.translate_code(func_body, &mut func_body_sec_builder)?;
 	}
 
 	let mut func_sec_builder = FunctionSection::new();
 
-	for func_body in module_info.function_section() {
+	for func_body in module_info.function_section()? {
 		func_sec_builder.function(func_body);
 	}
 

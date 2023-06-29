@@ -141,7 +141,7 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 		todo!("Array type not supported yet");
 	};
 	let mut body_reader = module
-		.code_section()
+		.code_section()?
 		.get(func_idx as usize)
 		.ok_or_else(|| anyhow!("function body for the index isn't found"))?
 		.get_operators_reader()?;

@@ -11,7 +11,8 @@ use wasmparser::{
 	Chunk, CodeSectionReader, Element, ElementSectionReader, Export, ExportSectionReader,
 	ExternalKind, FunctionBody, FunctionSectionReader, Global, GlobalSectionReader, GlobalType,
 	Import, ImportSectionReader, IndirectNameMap, MemorySectionReader, MemoryType, NameMap,
-	NameSectionReader, Parser, Payload, Table, TableSectionReader, TableType, Type,
+	NameSectionReader, Parser, Payload, Result as WasmParserResult, Table, TableSectionReader,
+	TableType, Type,
 };
 
 #[derive(Clone, Debug)]
@@ -89,18 +90,18 @@ pub struct ModuleInfo {
 macro_rules! add_section_function {
 	($name:ident, $ty:expr) => {
 		paste! {
+			// TODO Consider reworking it to return iterator
 			#[allow(dead_code)]
-			pub fn [< $name:lower _section>](&self) -> Vec<$ty> {
+			pub fn [< $name:lower _section>](&self) -> Result<Vec<$ty>> {
 
 				if let Some(section) =  self.raw_sections.get(&SectionId::$name.into()) {
-					if let Ok(reader) = [< $name SectionReader >]::new(&section.data, 0) {
-						// Assuming the module has already been validated and no errors shall occur
-						// when iterating the items
-						return reader.into_iter().filter_map(|x| x.ok()).collect::<Vec<$ty>>();
-					}
+					let reader = [< $name SectionReader >]::new(&section.data, 0)?;
+					reader.into_iter().collect::<WasmParserResult<Vec<$ty>>>()
+						.map_err(|err| anyhow!(err))
 				}
-
-				return vec![];
+				else {
+					Ok(vec![])
+				}
 			}
 		}
 	};
@@ -332,7 +333,7 @@ impl ModuleInfo {
 	pub fn add_export(&mut self, name: &str, kind: ExportKind, index: u32) -> Result<()> {
 		let mut section_builder = wasm_encoder::ExportSection::new();
 
-		for export in self.export_section() {
+		for export in self.export_section()? {
 			let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
 			section_builder.export(export.name, export_kind, export.index);
 		}
@@ -372,7 +373,7 @@ impl ModuleInfo {
 		// Recreate Function section
 		let mut section_builder = wasm_encoder::FunctionSection::new();
 
-		for function in self.function_section() {
+		for function in self.function_section()? {
 			section_builder.function(function);
 		}
 
@@ -408,7 +409,7 @@ impl ModuleInfo {
 
 		// Recreate Import section
 		let mut import_decoder = wasm_encoder::ImportSection::new();
-		for import in self.import_section() {
+		for import in self.import_section()? {
 			DefaultTranslator.translate_import(import, &mut import_decoder)?;
 		}
 
@@ -425,8 +426,9 @@ impl ModuleInfo {
 		global_name: &str,
 		global_type: GlobalType,
 	) -> Result<()> {
+		// Recreate Import section
 		let mut import_decoder = wasm_encoder::ImportSection::new();
-		for import in self.import_section() {
+		for import in self.import_section()? {
 			DefaultTranslator.translate_import(import, &mut import_decoder)?;
 		}
 
@@ -443,7 +445,7 @@ impl ModuleInfo {
 	pub fn modify_memory_type(&mut self, mem_index: u32, mem_type: MemoryType) -> Result<()> {
 		let mut memory_builder = wasm_encoder::MemorySection::new();
 		let mut memory_types = vec![];
-		for (index, memory) in self.memory_section().iter().enumerate() {
+		for (index, memory) in self.memory_section()?.iter().enumerate() {
 			let encoded_mem_type = if index as u32 != mem_index {
 				memory_types.push(*memory);
 				DefaultTranslator.translate_memory_type(memory)?
