@@ -84,7 +84,6 @@ pub struct ModuleInfo {
 
 	// raw_sections
 	pub raw_sections: BTreeMap<u8, RawSection>,
-	pub component_raw_sections: BTreeMap<u8, RawSection>,
 }
 
 macro_rules! add_section_function {
@@ -239,9 +238,7 @@ impl ModuleInfo {
 						);
 					}
 				},
-				Payload::UnknownSection { id, contents: _, range } => {
-					info.section(id, range, input_wasm);
-				},
+
 				Payload::DataCountSection { count: _, range } => {
 					info.section(SectionId::DataCount.into(), range, input_wasm);
 				},
