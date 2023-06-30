@@ -271,17 +271,23 @@ impl ModuleInfo {
 		self.raw_sections.insert(id, RawSection::new(id, full_wasm[range].to_vec()));
 	}
 
-	/// Returns the function type based on the index of the function type
+	/// Returns the function type based on the index of the type
+	/// `types[idx]`
+	pub fn get_type_by_idx(&self, type_idx: u32) -> Result<&Type> {
+		if type_idx >= self.types_map.len() as u32 {
+			return Err(anyhow!("type {} does not exist", type_idx));
+		}
+		Ok(&self.types_map[type_idx as usize])
+	}
+
+	/// Returns the function type based on the index of the function
 	/// `types[functions[idx]]`
-	pub fn get_functype_idx(&self, idx: u32) -> Result<&Type> {
-		if idx >= self.function_map.len() as u32 {
-			return Err(anyhow!("function {} not exit", idx));
+	pub fn get_type_by_func_idx(&self, func_idx: u32) -> Result<&Type> {
+		if func_idx >= self.function_map.len() as u32 {
+			return Err(anyhow!("function {} does not exist", func_idx));
 		}
-		let functpeindex = self.function_map[idx as usize] as usize;
-		if functpeindex >= self.types_map.len() {
-			return Err(anyhow!("type {} not exit", functpeindex));
-		}
-		Ok(&self.types_map[functpeindex])
+		let type_idx = self.function_map[func_idx as usize];
+		self.get_type_by_idx(type_idx)
 	}
 
 	pub fn resolve_type_idx(&self, t: &Type) -> Option<u32> {

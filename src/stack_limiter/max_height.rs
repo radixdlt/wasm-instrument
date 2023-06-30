@@ -135,7 +135,7 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 
 	// Get a signature and a body of the specified function.
 	let wasmparser::Type::Func(func_signature) =
-		module.get_functype_idx(module.imported_functions_count + func_idx)?
+		module.get_type_by_func_idx(module.imported_functions_count + func_idx)?
 	else {
 		// TODO: Type::Array(_)
 		todo!("Array type not supported yet");
@@ -255,7 +255,7 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 			},
 			Call { function_index } => {
 				let Type::Func(ty) =
-					module.get_functype_idx(function_index)?
+					module.get_type_by_func_idx(function_index)?
 				else {
 					// TODO: Type::Array(_)
 					todo!("Array type not supported yet");

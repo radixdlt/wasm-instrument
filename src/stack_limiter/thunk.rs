@@ -65,7 +65,7 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 				replacement_map.insert(
 					func_idx,
 					Thunk {
-						signature: match module_info.get_functype_idx(func_idx)?.clone() {
+						signature: match module_info.get_type_by_func_idx(func_idx)?.clone() {
 							Type::Func(ft) => ft,
 							// TODO: proper handling of Array
 							Type::Array(_) => todo!(),
