@@ -228,7 +228,16 @@ impl ModuleInfo {
 					info.data_segments_count = reader.count();
 					info.section(SectionId::Data.into(), reader.range(), input_wasm);
 				},
+				#[allow(unused_variables)]
 				Payload::CustomSection(c) => {
+					// FIXME
+					//  We are skipping the section due to following reason:
+					//  when dumping with custom section, WASM file is invalid:
+					//   'invalid UTF-8 encoding (at offset 0xd)'
+					//  Most likely it needs different encoding
+					//  To reproduce, call validate() with "custom_section_parse" feature enabled
+
+					#[cfg(feature = "custom_section_parse")]
 					// At the moment only name section supported
 					if c.name() == "name" {
 						info.section(
@@ -467,8 +476,8 @@ impl ModuleInfo {
 
 	pub fn bytes(&self) -> Vec<u8> {
 		let mut module = wasm_encoder::Module::new();
-		for s in self.raw_sections.values() {
-			module.section(s);
+		for section in self.raw_sections.values() {
+			module.section(section);
 		}
 		module.finish()
 	}

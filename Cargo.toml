@@ -44,6 +44,9 @@ wasmi = "0.29"
 [features]
 default = ["std"]
 std = []
+# Enable to let parser parse Custom section as well - required to pass all tests
+# Disabled by default because it causes some issues when encoding back to WASM.
+custom_section_parse = []
 #std = ["parity-wasm/std"]
 #sign_ext = ["parity-wasm/sign_ext"]
 
