@@ -283,9 +283,9 @@ pub fn const_expr(
 	let op = e.read()?;
 	if let ConstExprKind::ElementFunction = ctx {
 		match op {
-			Operator::RefFunc { .. }
-			| Operator::RefNull { hty: wasmparser::HeapType::Func, .. }
-			| Operator::GlobalGet { .. } => {},
+			Operator::RefFunc { .. } |
+			Operator::RefNull { hty: wasmparser::HeapType::Func, .. } |
+			Operator::GlobalGet { .. } => {},
 			_ => return Err(anyhow!("no_mutations_applicable")),
 		}
 	}
