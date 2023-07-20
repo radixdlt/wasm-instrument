@@ -12,7 +12,8 @@ pub use backend::{host_function, mutable_global, Backend, GasMeter};
 mod validation;
 
 use crate::utils::{
-	module_info::{copy_locals, process_custom_section, truncate_len_from_encoder, ModuleInfo},
+	module_info::{copy_locals, truncate_len_from_encoder, ModuleInfo},
+	transform::process_custom_section,
 	translator::{ConstExprKind, DefaultTranslator, Translator},
 };
 

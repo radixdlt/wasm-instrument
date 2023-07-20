@@ -1,6 +1,7 @@
 //! Contains the code for the stack height limiter instrumentation.
 use crate::utils::{
-	module_info::{copy_locals, process_custom_section, ModuleInfo},
+	module_info::{copy_locals, ModuleInfo},
+	transform::process_custom_section,
 	translator::{DefaultTranslator, Translator},
 };
 use alloc::vec::Vec;
