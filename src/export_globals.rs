@@ -1,6 +1,6 @@
-use crate::parser::{
+use crate::utils::{
+	module_info::ModuleInfo,
 	translator::{DefaultTranslator, Translator},
-	ModuleInfo,
 };
 use alloc::{format, vec, vec::Vec};
 use wasm_encoder::{ExportKind, ExportSection, SectionId};
@@ -46,7 +46,7 @@ pub fn export_mutable_globals(module_info: &mut ModuleInfo, prefix: &str) {
 #[cfg(test)]
 mod tests {
 	use super::export_mutable_globals;
-	use crate::parser::ModuleInfo;
+	use crate::utils::module_info::ModuleInfo;
 
 	fn parse_wat(source: &str) -> ModuleInfo {
 		let module_bytes = wat::parse_str(source).unwrap();

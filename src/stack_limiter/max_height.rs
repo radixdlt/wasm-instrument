@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use crate::parser::ModuleInfo;
+use crate::utils::module_info::ModuleInfo;
 use anyhow::{anyhow, Result};
 use wasmparser::{BlockType, Type};
 
@@ -106,7 +106,7 @@ impl Stack {
 	/// values popped.
 	fn pop_values(&mut self, value_count: u32) -> Result<()> {
 		if value_count == 0 {
-			return Ok(())
+			return Ok(());
 		}
 		{
 			let top_frame = self.frame(0)?;
@@ -117,8 +117,8 @@ impl Stack {
 				return if top_frame.is_polymorphic {
 					Ok(())
 				} else {
-					return Err(anyhow!("trying to pop more values than pushed"))
-				}
+					return Err(anyhow!("trying to pop more values than pushed"));
+				};
 			}
 		}
 

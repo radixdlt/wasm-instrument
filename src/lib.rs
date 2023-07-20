@@ -6,7 +6,7 @@ mod export_globals;
 pub mod gas_metering;
 mod stack_limiter;
 
-pub mod parser;
+pub mod utils;
 
 pub use export_globals::export_mutable_globals;
 pub use stack_limiter::inject as inject_stack_limiter;

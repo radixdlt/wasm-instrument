@@ -1,7 +1,6 @@
-use alloc::{string::String, vec, vec::Vec};
-pub mod translator;
-use crate::parser::translator::{DefaultTranslator, Translator};
+use crate::utils::translator::{DefaultTranslator, Translator};
 use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::{string::String, vec, vec::Vec};
 use anyhow::{anyhow, Result};
 use core::ops::Range;
 use paste::paste;
@@ -129,7 +128,7 @@ impl ModuleInfo {
 					// update slice, bypass the section
 					wasm = &input_wasm[range.end..];
 
-					continue
+					continue;
 				},
 				Payload::TypeSection(reader) => {
 					info.section(SectionId::Type.into(), reader.range(), input_wasm);
@@ -280,7 +279,7 @@ impl ModuleInfo {
 	/// `types[idx]`
 	pub fn get_type_by_idx(&self, type_idx: u32) -> Result<&Type> {
 		if type_idx >= self.types_map.len() as u32 {
-			return Err(anyhow!("type {} does not exist", type_idx))
+			return Err(anyhow!("type {} does not exist", type_idx));
 		}
 		Ok(&self.types_map[type_idx as usize])
 	}
@@ -289,7 +288,7 @@ impl ModuleInfo {
 	/// `types[functions[idx]]`
 	pub fn get_type_by_func_idx(&self, func_idx: u32) -> Result<&Type> {
 		if func_idx >= self.function_map.len() as u32 {
-			return Err(anyhow!("function {} does not exist", func_idx))
+			return Err(anyhow!("function {} does not exist", func_idx));
 		}
 		let type_idx = self.function_map[func_idx as usize];
 		self.get_type_by_idx(type_idx)
@@ -300,7 +299,7 @@ impl ModuleInfo {
 		for (index, ty) in self.types_map.iter().enumerate() {
 			let Type::Func(ot) = ty else { todo!() };
 			if ot.eq(dt) {
-				return Some(index as u32)
+				return Some(index as u32);
 			}
 		}
 		None

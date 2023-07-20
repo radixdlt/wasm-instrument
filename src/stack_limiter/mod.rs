@@ -1,8 +1,7 @@
 //! Contains the code for the stack height limiter instrumentation.
-use crate::parser::{
-	copy_locals, process_custom_section,
+use crate::utils::{
+	module_info::{copy_locals, process_custom_section, ModuleInfo},
 	translator::{DefaultTranslator, Translator},
-	ModuleInfo,
 };
 use alloc::vec::Vec;
 use anyhow::{anyhow, Result};
@@ -302,7 +301,7 @@ fn instrument_function(ctx: &mut Context, func: FunctionBody) -> Result<Function
 	}
 
 	if call_peeker.next().is_some() {
-		return Err(anyhow!("not all calls were used"))
+		return Err(anyhow!("not all calls were used"));
 	}
 
 	Ok(func_code_builder)

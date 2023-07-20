@@ -3,9 +3,9 @@ use std::{
 	path::PathBuf,
 };
 use wasm_instrument::{
-	self as instrument,
 	gas_metering::{self, host_function, mutable_global, ConstantCostRules},
 	inject_stack_limiter,
+	utils::module_info::ModuleInfo,
 };
 
 fn fixture_dir() -> PathBuf {
@@ -17,8 +17,7 @@ fn fixture_dir() -> PathBuf {
 
 use gas_metering::Backend;
 fn gas_metered_mod_len<B: Backend>(input_wasm: &[u8], backend: B) -> (Vec<u8>, usize) {
-	let mut module =
-		instrument::parser::ModuleInfo::new(input_wasm).expect("Failed to parse WASM input");
+	let mut module = ModuleInfo::new(input_wasm).expect("Failed to parse WASM input");
 	let wasm_bytes =
 		gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
 	let len = wasm_bytes.len();
@@ -26,8 +25,7 @@ fn gas_metered_mod_len<B: Backend>(input_wasm: &[u8], backend: B) -> (Vec<u8>, u
 }
 
 fn stack_limited_mod_len(input_wasm: &[u8]) -> (Vec<u8>, usize) {
-	let mut module =
-		instrument::parser::ModuleInfo::new(input_wasm).expect("Failed to parse WASM input");
+	let mut module = ModuleInfo::new(input_wasm).expect("Failed to parse WASM input");
 	let wasm_bytes = inject_stack_limiter(&mut module, 128).unwrap();
 	let len = wasm_bytes.len();
 	(wasm_bytes, len)
@@ -52,8 +50,9 @@ fn size_overheads_all(files: ReadDir) -> Vec<InstrumentedWasmResults> {
 			let (original_module_len, orig_wasm) = {
 				let bytes = match entry.path().extension().unwrap().to_str() {
 					Some("wasm") => read(entry.path()).unwrap(),
-					Some("wat") =>
-						wat::parse_bytes(&read(entry.path()).unwrap()).unwrap().into_owned(),
+					Some("wat") => {
+						wat::parse_bytes(&read(entry.path()).unwrap()).unwrap().into_owned()
+					},
 					_ => panic!("expected fixture_dir containing .wasm or .wat files only"),
 				};
 

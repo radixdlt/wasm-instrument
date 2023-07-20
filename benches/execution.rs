@@ -8,7 +8,7 @@ use std::{
 };
 use wasm_instrument::{
 	gas_metering::{self, host_function, mutable_global, ConstantCostRules},
-	parser::ModuleInfo,
+	utils::module_info::ModuleInfo,
 };
 use wasmi::{
 	core::{Pages, TrapCode, F32},

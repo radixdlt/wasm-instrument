@@ -9,7 +9,7 @@ use std::{
 use wasm_instrument::{
 	gas_metering::{self, host_function, ConstantCostRules},
 	inject_stack_limiter,
-	parser::ModuleInfo,
+	utils::module_info::ModuleInfo,
 };
 
 fn fixture_dir() -> PathBuf {

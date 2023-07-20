@@ -3,7 +3,7 @@ use std::{
 	io::{self, Read, Write},
 	path::{Path, PathBuf},
 };
-use wasm_instrument::{self as instrument, gas_metering};
+use wasm_instrument::{self as instrument, gas_metering, utils::module_info::ModuleInfo};
 use wasmparser::validate;
 
 fn slurp<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
@@ -81,8 +81,8 @@ mod stack_height {
 					concat!(stringify!($name), ".wat"),
 					concat!(stringify!($name), ".wat"),
 					|input| {
-						let mut module = instrument::parser::ModuleInfo::new(input)
-							.expect("Failed to parse WASM input");
+						let mut module =
+							ModuleInfo::new(input).expect("Failed to parse WASM input");
 						let instrumented = instrument::inject_stack_limiter(&mut module, 1024)
 							.expect("Failed to instrument with stack counter");
 						instrumented
@@ -115,8 +115,8 @@ mod gas {
 					|input| {
 						let rules = gas_metering::ConstantCostRules::default();
 
-						let mut module = instrument::parser::ModuleInfo::new(input)
-							.expect("Failed to parse WASM input");
+						let mut module =
+							ModuleInfo::new(input).expect("Failed to parse WASM input");
 
 						let backend = gas_metering::host_function::Injector::new("env", "gas");
 
@@ -136,8 +136,8 @@ mod gas {
 					|input| {
 						let rules = gas_metering::ConstantCostRules::default();
 
-						let mut module = instrument::parser::ModuleInfo::new(input)
-							.expect("Failed to parse WASM input");
+						let mut module =
+							ModuleInfo::new(input).expect("Failed to parse WASM input");
 						let backend =
 							gas_metering::mutable_global::Injector::new("env", "gas_left");
 						let instrumented = gas_metering::inject(&mut module, backend, &rules)

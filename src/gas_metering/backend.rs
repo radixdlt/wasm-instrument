@@ -1,5 +1,5 @@
 //! Provides backends for the gas metering instrumentation
-use crate::parser::ModuleInfo;
+use crate::utils::module_info::ModuleInfo;
 use wasm_encoder::Function;
 
 /// Implementation details of the specific method of the gas metering.
@@ -36,7 +36,7 @@ pub trait Backend {
 /// Gas metering with an external host function.
 pub mod host_function {
 	use super::{Backend, GasMeter, Rules};
-	use crate::parser::ModuleInfo;
+	use crate::utils::module_info::ModuleInfo;
 
 	/// Injects invocations of the gas charging host function into each metering block.
 	pub struct Injector {
@@ -74,9 +74,9 @@ pub mod host_function {
 /// bloat. This is a known issue to be fixed in upcoming versions.
 pub mod mutable_global {
 	use super::{Backend, GasMeter, Rules};
-	use crate::parser::{
+	use crate::utils::{
+		module_info::ModuleInfo,
 		translator::{DefaultTranslator, Translator},
-		ModuleInfo,
 	};
 	use alloc::vec;
 	use wasmparser::{BlockType, Operator};

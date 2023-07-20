@@ -1,7 +1,7 @@
 use super::Context;
-use crate::parser::{
+use crate::utils::{
+	module_info::ModuleInfo,
 	translator::{ConstExprKind, DefaultTranslator, Translator},
-	ModuleInfo,
 };
 #[cfg(not(features = "std"))]
 use alloc::collections::BTreeMap as Map;
