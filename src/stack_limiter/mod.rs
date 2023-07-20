@@ -134,10 +134,14 @@ fn generate_stack_height_global(module: &mut ModuleInfo) -> Result<u32> {
 	let mut global_sec_builder = GlobalSection::new();
 	let index = {
 		let global_sec = module.global_section()?;
-		for global in &global_sec {
-			DefaultTranslator.translate_global(*global, &mut global_sec_builder)?;
+		if let Some(global_sec) = global_sec {
+			for global in &global_sec {
+				DefaultTranslator.translate_global(*global, &mut global_sec_builder)?;
+			}
+			global_sec.len() as u32
+		} else {
+			0
 		}
-		global_sec.len() as u32
 	};
 
 	global_sec_builder
@@ -179,6 +183,7 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32> {
 	// get_locals_reader() returns iterator over local types
 	let local_reader = module
 		.code_section()?
+		.expect("no code section")
 		.get(defined_func_idx as usize)
 		.ok_or_else(|| anyhow!("function body is out of bounds"))?
 		.get_locals_reader()?;
@@ -203,7 +208,7 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32> {
 fn instrument_functions(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()> {
 	let mut code_builder = CodeSection::new();
 
-	for body in module.code_section()? {
+	for body in module.code_section()?.expect("no code section") {
 		let body_encoder = instrument_function(ctx, body)?;
 		code_builder.function(&body_encoder);
 	}

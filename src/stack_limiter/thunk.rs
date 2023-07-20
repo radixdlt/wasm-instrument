@@ -25,8 +25,8 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 	// First, we need to collect all function indices that should be replaced by thunks
 
 	let mut replacement_map: Map<u32, Thunk> = {
-		let elements = module_info.element_section()?;
-		let exports = module_info.export_section()?;
+		let elements = module_info.element_section()?.unwrap_or(vec![]);
+		let exports = module_info.export_section()?.unwrap_or(vec![]);
 		let exported_func_indices = exports.iter().filter_map(|entry| match entry.kind {
 			ExternalKind::Func => Some(entry.index),
 			_ => None,
@@ -118,7 +118,7 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 
 	// Fixup original function index to a index of a thunk generated earlier.
 	let mut export_sec_builder = ExportSection::new();
-	let exports = module_info.export_section()?;
+	let exports = module_info.export_section()?.unwrap_or(vec![]);
 	for export in exports {
 		let mut function_idx = export.index;
 		if let ExternalKind::Func = export.kind {
@@ -135,7 +135,7 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 	}
 
 	let mut ele_sec_builder = ElementSection::new();
-	let elements = module_info.element_section()?;
+	let elements = module_info.element_section()?.unwrap_or(vec![]);
 	for elem in elements {
 		let mut functions = vec![];
 		match elem.items {

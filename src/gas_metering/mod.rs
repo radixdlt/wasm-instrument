@@ -235,6 +235,7 @@ pub fn inject<R: Rules, B: Backend>(
 
 		for (func_body, is_last) in module_info
 			.code_section()?
+			.ok_or_else(|| anyhow!("no code section"))?
 			.into_iter()
 			.enumerate()
 			.map(|(index, item)| (item, index as u32 == code_item_count - 1))
@@ -306,7 +307,7 @@ pub fn inject<R: Rules, B: Backend>(
 		if let GasMeter::External { .. } = gas_meter {
 			let mut export_sec_builder = ExportSection::new();
 
-			for export in module_info.export_section()? {
+			for export in module_info.export_section()?.expect("no export section") {
 				let mut export_index = export.index;
 				if let ExternalKind::Func = export.kind {
 					if export_index >= gas_func_idx {
@@ -331,7 +332,10 @@ pub fn inject<R: Rules, B: Backend>(
 		if let GasMeter::External { .. } = gas_meter {
 			let mut ele_sec_builder = ElementSection::new();
 
-			for elem in module_info.element_section()? {
+			for elem in module_info
+				.element_section()?
+				.ok_or_else(|| anyhow!("no element_section section"))?
+			{
 				let mut functions = vec![];
 				if let ElementItems::Functions(func_indexes) = elem.items {
 					for func_idx in func_indexes {
@@ -814,7 +818,7 @@ mod tests {
 	fn get_function_body(raw_wasm: &[u8], index: usize) -> Vec<u8> {
 		let module = ModuleInfo::new(raw_wasm).unwrap();
 		let func_sec = module.raw_sections.get(&SectionId::Code.into()).unwrap();
-		let func_bodies = module.code_section().unwrap();
+		let func_bodies = module.code_section().unwrap().expect("no code section");
 
 		let func_body = func_bodies
 			.get(index)
@@ -826,7 +830,7 @@ mod tests {
 
 	fn get_function_operators(raw_wasm: &[u8], index: usize) -> Vec<Instruction> {
 		let module = ModuleInfo::new(raw_wasm).unwrap();
-		let func_bodies = module.code_section().unwrap();
+		let func_bodies = module.code_section().unwrap().expect("no code section");
 
 		let func_body = func_bodies
 			.get(index)
