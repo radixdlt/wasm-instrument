@@ -2,7 +2,7 @@ use crate::parser::{
 	translator::{DefaultTranslator, Translator},
 	ModuleInfo,
 };
-use alloc::{format, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 use wasm_encoder::{ExportKind, ExportSection, SectionId};
 
 /// Export all declared mutable globals as `prefix_index`.
