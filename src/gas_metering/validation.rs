@@ -302,7 +302,7 @@ fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> bool {
 		}
 
 		if node.forward_edges.is_empty() && total_actual != total_charged {
-			return false;
+			return false
 		}
 
 		for loop_node_id in node.loopback_edges.iter() {
@@ -310,13 +310,13 @@ fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> bool {
 				.get_mut(loop_node_id)
 				.expect("cannot arrive at loopback edge without visiting loop entry node");
 			if loop_actual != loop_charged {
-				return false;
+				return false
 			}
 		}
 
 		for next_node_id in node.forward_edges.iter() {
 			if !visit(graph, *next_node_id, total_actual, total_charged, loop_costs) {
-				return false;
+				return false
 			}
 		}
 
@@ -346,8 +346,10 @@ fn validate_metering_injections(
 }
 
 mod tests {
-	use super::super::{copy_locals, determine_metered_blocks, ConstantCostRules};
-	use super::validate_metering_injections;
+	use super::{
+		super::{copy_locals, determine_metered_blocks, ConstantCostRules},
+		validate_metering_injections,
+	};
 	use binaryen::tools::translate_to_fuzz_mvp;
 	use rand::{thread_rng, RngCore};
 	use wasmparser::{CodeSectionReader, FunctionBody, Payload::CodeSectionStart};

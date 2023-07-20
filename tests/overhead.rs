@@ -52,9 +52,8 @@ fn size_overheads_all(files: ReadDir) -> Vec<InstrumentedWasmResults> {
 			let (original_module_len, orig_wasm) = {
 				let bytes = match entry.path().extension().unwrap().to_str() {
 					Some("wasm") => read(entry.path()).unwrap(),
-					Some("wat") => {
-						wat::parse_bytes(&read(entry.path()).unwrap()).unwrap().into_owned()
-					},
+					Some("wat") =>
+						wat::parse_bytes(&read(entry.path()).unwrap()).unwrap().into_owned(),
 					_ => panic!("expected fixture_dir containing .wasm or .wat files only"),
 				};
 

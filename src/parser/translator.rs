@@ -241,9 +241,8 @@ pub fn heapty(t: &mut dyn Translator, ty: &wasmparser::HeapType) -> Result<HeapT
 		wasmparser::HeapType::Struct => Ok(HeapType::Struct),
 		wasmparser::HeapType::Array => Ok(HeapType::Array),
 		wasmparser::HeapType::I31 => Ok(HeapType::I31),
-		wasmparser::HeapType::Indexed(i) => {
-			Ok(HeapType::Indexed(t.remap(Item::Type, (*i).into())?))
-		},
+		wasmparser::HeapType::Indexed(i) =>
+			Ok(HeapType::Indexed(t.remap(Item::Type, (*i).into())?)),
 	}
 }
 
@@ -285,9 +284,9 @@ pub fn const_expr(
 	let op = e.read()?;
 	if let ConstExprKind::ElementFunction = ctx {
 		match op {
-			Operator::RefFunc { .. }
-			| Operator::RefNull { hty: wasmparser::HeapType::Func, .. }
-			| Operator::GlobalGet { .. } => {},
+			Operator::RefFunc { .. } |
+			Operator::RefNull { hty: wasmparser::HeapType::Func, .. } |
+			Operator::GlobalGet { .. } => {},
 			_ => return Err(anyhow!("no_mutations_applicable")),
 		}
 	}
