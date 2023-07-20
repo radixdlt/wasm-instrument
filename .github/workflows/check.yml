@@ -2,16 +2,23 @@ name: Check
 
 on:
   push:
-    branches: [ master ]
+    branches:
+      - master
+      - radix-master
   pull_request:
-    branches: [ master ]
+    branches:
+    # Run on PR against any branch
 
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rustfmt:
-    runs-on: "ubuntu_20_64_core"
+    runs-on: "ubuntu-latest"
     steps:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -30,7 +37,7 @@ jobs:
           args: --all -- --check
 
   clippy:
-    runs-on: "ubuntu_20_64_core"
+    runs-on: "ubuntu-latest"
     steps:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -49,7 +56,7 @@ jobs:
           args: --all-targets --all-features -- -D warnings
 
   build:
-    runs-on: "ubuntu_20_64_core"
+    runs-on: "ubuntu-latest"
     steps:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -87,7 +94,7 @@ jobs:
   test:
     strategy:
       matrix:
-        os: ["ubuntu_20_64_core", "macos-latest", "windows-latest"]
+        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Install Rust toolchain
