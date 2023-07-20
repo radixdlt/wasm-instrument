@@ -302,7 +302,7 @@ fn instrument_function(ctx: &mut Context, func: FunctionBody) -> Result<Function
 	}
 
 	if call_peeker.next().is_some() {
-		return Err(anyhow!("not all calls were used"));
+		return Err(anyhow!("not all calls were used"))
 	}
 
 	Ok(func_code_builder)

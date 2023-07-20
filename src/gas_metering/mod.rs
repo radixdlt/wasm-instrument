@@ -272,7 +272,7 @@ pub fn inject<R: Rules, B: Backend>(
 				// before each invocation (see `inject_counter()`).
 				if is_last {
 					code_section_builder.function(&func_builder);
-					continue;
+					continue
 				}
 			}
 
@@ -286,7 +286,7 @@ pub fn inject<R: Rules, B: Backend>(
 				Ok(new_builder) => func_builder = new_builder,
 				Err(_) => {
 					error = true;
-					break;
+					break
 				},
 			}
 			if rules.memory_grow_cost().enabled() {
@@ -393,7 +393,7 @@ pub fn inject<R: Rules, B: Backend>(
 	process_custom_section(module_info, Some(gas_func_idx))?;
 
 	if error {
-		return Err(anyhow!("inject fail"));
+		return Err(anyhow!("inject fail"))
 	}
 
 	if need_grow_counter {
@@ -493,7 +493,7 @@ impl Counter {
 		let closing_control_index = self.stack.len();
 
 		if self.stack.is_empty() {
-			return Ok(());
+			return Ok(())
 		}
 
 		// Update the lowest_forward_br_target for the control block now on top of the stack.
@@ -544,7 +544,7 @@ impl Counter {
 					.cost
 					.checked_add(closing_metered_block.cost)
 					.ok_or_else(|| anyhow!("overflow occured"))?;
-				return Ok(());
+				return Ok(())
 			}
 		}
 
@@ -569,7 +569,7 @@ impl Counter {
 				target_block.is_loop
 			};
 			if target_is_loop {
-				continue;
+				continue
 			}
 
 			let control_block =
@@ -796,7 +796,7 @@ fn insert_metering_calls(
 	}
 
 	if block_iter.next().is_some() {
-		return Err(anyhow!("block should be consume all"));
+		return Err(anyhow!("block should be consume all"))
 	}
 	Ok(new_func)
 }
