@@ -206,13 +206,17 @@ fn compute_stack_cost(func_idx: u32, module: &mut ModuleInfo) -> Result<u32> {
 }
 
 fn instrument_functions(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()> {
-	let mut code_builder = CodeSection::new();
+	if let Some(section) = module.code_section()? {
+		let mut code_builder = CodeSection::new();
 
-	for body in module.code_section()?.expect("no code section") {
-		let body_encoder = instrument_function(ctx, body)?;
-		code_builder.function(&body_encoder);
+		for body in section {
+			let body_encoder = instrument_function(ctx, body)?;
+			code_builder.function(&body_encoder);
+		}
+		module.replace_section(SectionId::Code.into(), &code_builder)
+	} else {
+		Ok(())
 	}
-	module.replace_section(SectionId::Code.into(), &code_builder)
 }
 
 /// This function searches `call` instructions and wrap each call
