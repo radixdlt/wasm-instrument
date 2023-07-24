@@ -216,7 +216,8 @@ fn instrument_functions(ctx: &mut Context, module: &mut ModuleInfo) -> Result<()
 			let body_encoder = instrument_function(ctx, body)?;
 			code_builder.function(&body_encoder);
 		}
-		module.replace_section(SectionId::Code.into(), &code_builder)
+		module.replace_section(SectionId::Code.into(), &code_builder)?;
+		Ok(())
 	} else {
 		Ok(())
 	}

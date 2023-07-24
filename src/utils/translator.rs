@@ -1,9 +1,11 @@
+use crate::utils::errors::TranslatorError;
 use alloc::vec::Vec;
-use anyhow::{anyhow, Result};
 use wasm_encoder::*;
 use wasmparser::{
 	DataKind, ElementKind, ExternalKind, FunctionBody, Global, Import, Operator, Type,
 };
+
+type Result<T> = std::result::Result<T, TranslatorError>;
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub enum Item {
@@ -286,13 +288,13 @@ pub fn const_expr(
 			Operator::RefFunc { .. } |
 			Operator::RefNull { hty: wasmparser::HeapType::Func, .. } |
 			Operator::GlobalGet { .. } => {},
-			_ => return Err(anyhow!("no_mutations_applicable")),
+			_ => return Err(TranslatorError::NoMutationsApplicable),
 		}
 	}
 	t.translate_op(&op)?.encode(&mut offset_bytes);
 	match e.read()? {
 		Operator::End if e.eof() => {},
-		_ => return Err(anyhow!("no_mutations_applicable")),
+		_ => return Err(TranslatorError::NoMutationsApplicable),
 	}
 	Ok(wasm_encoder::ConstExpr::raw(offset_bytes))
 }
@@ -329,7 +331,7 @@ pub fn element(
 			functions = reader
 				.into_iter()
 				.map(|f| t.remap(Item::Function, f?))
-				.collect::<Result<Vec<_>, _>>()?;
+				.collect::<wasmparser::Result<Vec<_>, _>>()?;
 			Elements::Functions(&functions)
 		},
 		wasmparser::ElementItems::Expressions(reader) => {
@@ -342,7 +344,7 @@ pub fn element(
 						ConstExprKind::ElementFunction,
 					)
 				})
-				.collect::<Result<Vec<_>, _>>()?;
+				.collect::<wasmparser::Result<Vec<_>, _>>()?;
 			Elements::Expressions(&exprs)
 		},
 	};
@@ -390,7 +392,7 @@ pub fn op(t: &mut dyn Translator, op: &Operator<'_>) -> Result<Instruction<'stat
         (map $arg:ident targets) => ((
             $arg
                 .targets()
-                .collect::<Result<Vec<_>, wasmparser::BinaryReaderError>>()?
+                .collect::<wasmparser::Result<Vec<_>, wasmparser::BinaryReaderError>>()?
                 .into(),
             $arg.default(),
         ));

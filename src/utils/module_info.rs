@@ -1,11 +1,13 @@
-use crate::utils::translator::{DefaultTranslator, Translator};
+use crate::utils::{
+	errors::ModuleInfoError,
+	translator::{DefaultTranslator, Translator},
+};
 use alloc::{
 	collections::{BTreeMap, BTreeSet},
 	string::String,
 	vec,
 	vec::Vec,
 };
-use anyhow::{anyhow, Result};
 use core::ops::Range;
 use paste::paste;
 use wasm_encoder::{Encode, ExportKind, SectionId};
@@ -51,6 +53,8 @@ impl wasm_encoder::ComponentSection for RawSection {
 		self.id
 	}
 }
+
+type Result<T> = std::result::Result<T, ModuleInfoError>;
 
 /// Provides module information for future usage during mutation
 /// an instance of ModuleInfo could be user to determine which mutation could be applied
@@ -100,8 +104,7 @@ macro_rules! add_section_function {
 
 				if let Some(section) =  self.raw_sections.get(&SectionId::$name.into()) {
 					let reader = [< $name SectionReader >]::new(&section.data, 0)?;
-					let vec = reader.into_iter().collect::<WasmParserResult<Vec<$ty>>>()
-						.map_err(|err| anyhow!(err))?;
+					let vec = reader.into_iter().collect::<WasmParserResult<Vec<$ty>>>()?;
 					Ok(Some(vec))
 				}
 				else {
@@ -260,10 +263,9 @@ impl ModuleInfo {
 	pub fn validate(&self, features: WasmFeatures) -> Result<()> {
 		// TODO validate_all() creates internal parser and parses the binary again. Rework to
 		// validate while parsing
-		Validator::new_with_features(features)
-			.validate_all(&self.bytes())
-			.map(|_| ())
-			.map_err(|err| anyhow!(err))
+		Validator::new_with_features(features).validate_all(&self.bytes())?;
+
+		Ok(())
 	}
 
 	/// Registers a new raw_section in the ModuleInfo
@@ -276,7 +278,7 @@ impl ModuleInfo {
 	/// `types[idx]`
 	pub fn get_type_by_idx(&self, type_idx: u32) -> Result<&Type> {
 		if type_idx >= self.types_map.len() as u32 {
-			return Err(anyhow!("type {} does not exist", type_idx))
+			return Err(ModuleInfoError::TypeDoesNotExist(type_idx))
 		}
 		Ok(&self.types_map[type_idx as usize])
 	}
@@ -285,7 +287,7 @@ impl ModuleInfo {
 	/// `types[functions[idx]]`
 	pub fn get_type_by_func_idx(&self, func_idx: u32) -> Result<&Type> {
 		if func_idx >= self.function_map.len() as u32 {
-			return Err(anyhow!("function {} does not exist", func_idx))
+			return Err(ModuleInfoError::FunctionDoesNotExist(func_idx))
 		}
 		let type_idx = self.function_map[func_idx as usize];
 		self.get_type_by_idx(type_idx)
@@ -462,7 +464,7 @@ impl ModuleInfo {
 		let mut memory_types = vec![];
 		for (index, memory) in self
 			.memory_section()?
-			.ok_or_else(|| anyhow!("no memory section"))?
+			.ok_or_else(|| ModuleInfoError::NoMemorySection)?
 			.iter()
 			.enumerate()
 		{
