@@ -11,6 +11,17 @@ pub enum ModuleInfoError {
 	NoMemorySection,
 }
 
+impl core::fmt::Display for ModuleInfoError {
+	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+		match self {
+			ModuleInfoError::WasmParserError(err) => {
+				write!(f, "WasmParserError(BinaryReaderError {{ {} }})", err)
+			},
+			_ => write!(f, "{:?}", self),
+		}
+	}
+}
+
 impl From<BinaryReaderError> for ModuleInfoError {
 	fn from(err: BinaryReaderError) -> ModuleInfoError {
 		ModuleInfoError::WasmParserError(err)
