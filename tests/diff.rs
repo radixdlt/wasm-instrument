@@ -19,6 +19,18 @@ fn dump<P: AsRef<Path>>(path: P, buf: &[u8]) -> io::Result<()> {
 	Ok(())
 }
 
+#[cfg(feature = "ignore_custom_section")]
+fn remove_custom_section(wat: &str) -> String {
+	let wasm = wabt::Wat2Wasm::new()
+		.write_debug_names(false) // it causes Custom section ignoring
+		.convert(wat)
+		.unwrap()
+		.as_ref()
+		.to_vec();
+
+	wasmprinter::print_bytes(wasm).expect("Failed to convert result wasm to wat")
+}
+
 fn run_diff_test<F: FnOnce(&[u8]) -> Vec<u8>>(
 	test_dir: &str,
 	in_name: &str,
@@ -42,6 +54,11 @@ fn run_diff_test<F: FnOnce(&[u8]) -> Vec<u8>>(
 
 	let expected_wat = slurp(&expected_path).unwrap_or_default();
 	let expected_wat = std::str::from_utf8(&expected_wat).expect("Failed to decode expected wat");
+
+	#[cfg(feature = "ignore_custom_section")]
+	let expected_wat = remove_custom_section(expected_wat);
+	#[cfg(feature = "ignore_custom_section")]
+	let expected_wat = expected_wat.as_ref();
 
 	let actual_wasm = test(fixture_wasm.as_ref());
 	validate(&actual_wasm).expect("Result module is invalid");
