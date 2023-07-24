@@ -11,12 +11,12 @@ pub use backend::{host_function, mutable_global, Backend, GasMeter};
 #[cfg(test)]
 mod validation;
 
+#[cfg(not(feature = "ignore_custom_section"))]
+use crate::utils::transform::process_custom_section;
 use crate::utils::{
 	module_info::{copy_locals, truncate_len_from_encoder, ModuleInfo},
-	transform::process_custom_section,
 	translator::{ConstExprKind, DefaultTranslator, Translator},
 };
-
 use alloc::{vec, vec::Vec};
 use anyhow::{anyhow, Result};
 use core::{cmp::min, mem, num::NonZeroU32};
@@ -390,6 +390,7 @@ pub fn inject<R: Rules, B: Backend>(
 		}
 	}
 
+	#[cfg(not(feature = "ignore_custom_section"))]
 	process_custom_section(module_info, Some(gas_func_idx))?;
 
 	if error {

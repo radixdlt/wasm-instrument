@@ -45,9 +45,13 @@ wabt = { version = "0.10.0" }
 [features]
 default = ["std"]
 std = []
-# Enable to let parser parse Custom section as well - required to pass all tests
-# Disabled by default because it causes some issues when encoding back to WASM.
-custom_section_parse = []
+# If set then custom section is ignored (if present) when WASM parsing into ModuleInfo. If it is
+# later converted back to WASM code, custom section will not be present.
+# It allows to spare some memory.
+# According to the WASM spec (see
+# https://webassembly.github.io/spec/core/appendix/custom.html#custom-sections)
+# ignoring Custom section shall not have any impact.
+ignore_custom_section = []
 
 [lib]
 bench = false

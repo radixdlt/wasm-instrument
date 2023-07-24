@@ -236,7 +236,7 @@ impl ModuleInfo {
 				},
 				#[allow(unused_variables)]
 				Payload::CustomSection(c) => {
-					#[cfg(feature = "custom_section_parse")]
+					#[cfg(not(feature = "ignore_custom_section"))]
 					// At the moment only name section supported
 					if c.name() == "name" {
 						info.section(SectionId::Custom.into(), c.range(), input_wasm);
@@ -637,9 +637,9 @@ mod tests {
 	}
 
 	fn wat_to_wasm(code: &str) -> Vec<u8> {
-		#[cfg(feature = "custom_section_parse")]
+		#[cfg(not(feature = "ignore_custom_section"))]
 		let write_debug_names = true;
-		#[cfg(not(feature = "custom_section_parse"))]
+		#[cfg(feature = "ignore_custom_section")]
 		let write_debug_names = false;
 
 		wabt::Wat2Wasm::new()

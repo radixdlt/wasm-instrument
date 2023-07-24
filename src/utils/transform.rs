@@ -1,3 +1,5 @@
+// this piece of code is needed only if "ignore_custom_section" is not set
+
 use crate::utils::module_info::ModuleInfo;
 use anyhow::{anyhow, Result};
 use wasm_encoder::SectionId;
