@@ -54,7 +54,7 @@ impl wasm_encoder::ComponentSection for RawSection {
 	}
 }
 
-type Result<T> = std::result::Result<T, ModuleInfoError>;
+type Result<T> = core::result::Result<T, ModuleInfoError>;
 
 /// Provides module information for future usage during mutation
 /// an instance of ModuleInfo could be user to determine which mutation could be applied
@@ -685,16 +685,11 @@ mod tests {
 	#[test]
 	fn test_check_wasm_wat_conversion() {
 		let bytes = wat_to_wasm(WAT);
-		println!("bytes ({}) = {:?}", bytes.len(), bytes);
-
 		let expected_wat = wasm_to_wat(&bytes);
-		println!("expected_wat = {}", expected_wat);
 
 		let module = ModuleInfo::new(&bytes).unwrap();
 		let bytes = module.bytes();
-		println!("bytes ({}) = {:?}", bytes.len(), bytes);
 		let wat = wasm_to_wat(&bytes);
-		println!("wat = {}", wat);
 
 		assert_eq!(expected_wat, wat)
 	}

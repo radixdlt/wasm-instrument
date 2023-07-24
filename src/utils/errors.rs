@@ -1,3 +1,4 @@
+use alloc::string::String;
 use anyhow::{anyhow, Error};
 use wasmparser::BinaryReaderError;
 

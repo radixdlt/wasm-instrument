@@ -5,7 +5,7 @@ use wasmparser::{
 	DataKind, ElementKind, ExternalKind, FunctionBody, Global, Import, Operator, Type,
 };
 
-type Result<T> = std::result::Result<T, TranslatorError>;
+type Result<T> = core::result::Result<T, TranslatorError>;
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub enum Item {
