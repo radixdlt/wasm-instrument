@@ -1,5 +1,5 @@
 use crate::utils::module_info::ModuleInfo;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use wasm_encoder::SectionId;
 use wasmparser::{IndirectNameMap, NameMap, NameSectionReader};
 
@@ -34,8 +34,29 @@ pub fn process_custom_section(
 	update_func_idx: Option<u32>,
 ) -> Result<()> {
 	if let Some(custom_section) = module_info.raw_sections.get_mut(&SectionId::Custom.into()) {
+		// ATM the only supported custom section is "name"
+		// This is what we are looking in the section data
+		// Exemplary custom section data:
+		// [
+		// 	4,                                          // length of the section name, 4 in case of
+		// "name" 	110, 97, 109, 101,                          // "name" in ASCII
+		// 	1, 9, 1, 0, 6, 84, 101, 115, 116, 95, 102,  // Functions name mapping
+		// 	2, 6, 1, 0, 1, 0, 1, 48 ]                   // Locals name mapping
+
+		let data_offset = 1 + custom_section.data[0] as usize;
+
+		if &custom_section.data[1..data_offset] != "name".as_bytes() {
+			return Err(anyhow!("Not supported custom section"))
+		}
+
+		// That should only happen only if section was added manually, which is not supported at the
+		// moment for Custom sections
+		let offset =
+			custom_section.offset.ok_or_else(|| anyhow!("Custom section offset missing"))?;
+
 		let mut name_section_builder = wasm_encoder::NameSection::new();
-		let name_sec_reader = NameSectionReader::new(&custom_section.data, 0);
+
+		let name_sec_reader = NameSectionReader::new(&custom_section.data[data_offset..], offset);
 
 		for item in name_sec_reader {
 			match item? {

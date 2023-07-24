@@ -40,6 +40,7 @@ pretty_assertions = "1"
 rand = "0.8"
 wat = "1"
 wasmi = "0.29"
+wabt = { version = "0.10.0" }
 
 [features]
 default = ["std"]

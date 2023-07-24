@@ -21,13 +21,16 @@ use wasmparser::{
 pub struct RawSection {
 	/// The id for this section.
 	pub id: u8,
+	/// The offset of this section in the original WASM file.
+	/// If the section is added manually, then set to None
+	pub offset: Option<usize>,
 	/// The raw data for this section.
 	pub data: Vec<u8>,
 }
 
 impl RawSection {
-	pub fn new(id: u8, data: Vec<u8>) -> Self {
-		RawSection { id, data }
+	pub fn new(id: u8, offset: Option<usize>, data: Vec<u8>) -> Self {
+		RawSection { id, offset, data }
 	}
 }
 
@@ -233,21 +236,10 @@ impl ModuleInfo {
 				},
 				#[allow(unused_variables)]
 				Payload::CustomSection(c) => {
-					// FIXME
-					//  We are skipping the section due to following reason:
-					//  when dumping with custom section, WASM file is invalid:
-					//   'invalid UTF-8 encoding (at offset 0xd)'
-					//  Most likely it needs different encoding
-					//  To reproduce, call validate() with "custom_section_parse" feature enabled
-
 					#[cfg(feature = "custom_section_parse")]
 					// At the moment only name section supported
 					if c.name() == "name" {
-						info.section(
-							SectionId::Custom.into(),
-							Range { start: c.data_offset(), end: c.range().end },
-							input_wasm,
-						);
+						info.section(SectionId::Custom.into(), c.range(), input_wasm);
 					}
 				},
 
@@ -276,7 +268,8 @@ impl ModuleInfo {
 
 	/// Registers a new raw_section in the ModuleInfo
 	pub fn section(&mut self, id: u8, range: Range<usize>, full_wasm: &[u8]) {
-		self.raw_sections.insert(id, RawSection::new(id, full_wasm[range].to_vec()));
+		self.raw_sections
+			.insert(id, RawSection::new(id, Some(range.start), full_wasm[range].to_vec()));
 	}
 
 	/// Returns the function type based on the index of the type
@@ -338,8 +331,13 @@ impl ModuleInfo {
 		sec_type: u8,
 		new_section: &impl wasm_encoder::Section,
 	) -> Result<()> {
-		self.raw_sections
-			.insert(sec_type, RawSection::new(sec_type, truncate_len_from_encoder(new_section)?));
+		// If section was not present before then offset is None
+		let offset = self.raw_sections.get(&sec_type).and_then(|sec| sec.offset);
+
+		self.raw_sections.insert(
+			sec_type,
+			RawSection::new(sec_type, offset, truncate_len_from_encoder(new_section)?),
+		);
 		Ok(())
 	}
 
@@ -485,7 +483,6 @@ impl ModuleInfo {
 		let mut module = wasm_encoder::Module::new();
 
 		let section_order = [
-			SectionId::Custom,
 			SectionId::Type,
 			SectionId::Import,
 			SectionId::Function,
@@ -495,9 +492,10 @@ impl ModuleInfo {
 			SectionId::Export,
 			SectionId::Start,
 			SectionId::Element,
-			SectionId::DataCount, // datacount goes before code
+			SectionId::DataCount, /* datacount goes before code, see: https://webassembly.github.io/spec/core/binary/modules.html#data-count-section */
 			SectionId::Code,
 			SectionId::Data,
+			SectionId::Custom, /* custom Name section after data section, see: https://webassembly.github.io/spec/core/appendix/custom.html#name-section */
 			SectionId::Tag,
 		];
 
@@ -620,4 +618,82 @@ pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Res
 	let mut r = wasmparser::BinaryReader::new(&d);
 	let size = r.read_var_u32()?;
 	Ok(r.read_bytes(size as usize)?.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn wasm_to_wat(bytes: &[u8]) -> String {
+		String::from_utf8(
+			wabt::Wasm2Wat::new()
+				.read_debug_names(true)
+				.convert(bytes)
+				.unwrap()
+				.as_ref()
+				.to_vec(),
+		)
+		.unwrap()
+	}
+
+	fn wat_to_wasm(code: &str) -> Vec<u8> {
+		#[cfg(feature = "custom_section_parse")]
+		let write_debug_names = true;
+		#[cfg(not(feature = "custom_section_parse"))]
+		let write_debug_names = false;
+
+		wabt::Wat2Wasm::new()
+			.write_debug_names(write_debug_names)
+			.convert(code)
+			.unwrap()
+			.as_ref()
+			.to_vec()
+	}
+
+	const WAT: &str = r#"
+		(module
+
+			(func $Test_f (param $0 i64) (result i64)
+			  ;; Grow memory
+			  (drop
+				(memory.grow (i32.const 1000000))
+			  )
+
+			  ;; Encode () in SBOR at address 0x0
+			  (i32.const 0)
+			  (i32.const 92)  ;; prefix
+			  (i32.store8)
+			  (i32.const 1)
+			  (i32.const 33)  ;; tuple value kind
+			  (i32.store8)
+			  (i32.const 2)
+			  (i32.const 0)  ;; tuple length
+			  (i32.store8)
+
+			  ;; Return slice (ptr = 0, len = 3)
+			  (i64.const 3)
+			)
+
+			(memory $0 1)
+			(export "memory" (memory $0))
+			(export "Test_f" (func $Test_f))
+		)
+		"#;
+
+	#[test]
+	fn test_check_wasm_wat_conversion() {
+		let bytes = wat_to_wasm(WAT);
+		println!("bytes ({}) = {:?}", bytes.len(), bytes);
+
+		let expected_wat = wasm_to_wat(&bytes);
+		println!("expected_wat = {}", expected_wat);
+
+		let module = ModuleInfo::new(&bytes).unwrap();
+		let bytes = module.bytes();
+		println!("bytes ({}) = {:?}", bytes.len(), bytes);
+		let wat = wasm_to_wat(&bytes);
+		println!("wat = {}", wat);
+
+		assert_eq!(expected_wat, wat)
+	}
 }
