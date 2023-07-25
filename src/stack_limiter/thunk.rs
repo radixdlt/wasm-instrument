@@ -171,7 +171,7 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 			ElementKind::Declared => ElementMode::Declared,
 		};
 
-		let element_type = DefaultTranslator.translate_refty(&elem.ty)?;
+		let element_type = DefaultTranslator.translate_ref_ty(&elem.ty)?;
 		let elements = Elements::Functions(&functions);
 
 		ele_sec_builder.segment(ElementSegment {

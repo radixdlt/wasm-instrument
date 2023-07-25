@@ -364,7 +364,7 @@ pub fn inject<R: Rules, B: Backend>(
 					ElementKind::Declared => ElementMode::Declared,
 				};
 
-				let element_type = DefaultTranslator.translate_refty(&elem.ty)?;
+				let element_type = DefaultTranslator.translate_ref_ty(&elem.ty)?;
 				let elements = Elements::Functions(&functions);
 
 				ele_sec_builder.segment(ElementSegment {
