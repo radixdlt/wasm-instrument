@@ -377,9 +377,11 @@ pub fn op(t: &mut dyn Translator, op: &Operator<'_>) -> Result<Instruction<'stat
 
 		O::Return => I::Return,
 		O::Call { function_index } => I::Call(*function_index),
-		O::CallIndirect { type_index, table_index, table_byte: _ } => {
-			I::CallIndirect { ty: *type_index, table: *table_index }
-		},
+		O::CallIndirect { type_index, table_index, table_byte: _ } =>
+			I::CallIndirect { ty: *type_index, table: *table_index },
+		O::ReturnCall { function_index } => I::ReturnCall(*function_index),
+		O::ReturnCallIndirect { type_index, table_index } =>
+			I::ReturnCallIndirect { ty: *type_index, table: *table_index },
 		O::Delegate { relative_depth } => I::Delegate(*relative_depth),
 		O::CatchAll => I::CatchAll,
 		O::Drop => I::Drop,
@@ -573,19 +575,16 @@ pub fn op(t: &mut dyn Translator, op: &Operator<'_>) -> Result<Instruction<'stat
 
 		O::MemoryInit { data_index, mem } => I::MemoryInit { data_index: *data_index, mem: *mem },
 		O::DataDrop { data_index } => I::DataDrop(*data_index),
-		O::MemoryCopy { dst_mem, src_mem } => {
-			I::MemoryCopy { src_mem: *src_mem, dst_mem: *dst_mem }
-		},
+		O::MemoryCopy { dst_mem, src_mem } =>
+			I::MemoryCopy { src_mem: *src_mem, dst_mem: *dst_mem },
 		O::MemoryDiscard { mem } => I::MemoryDiscard(*mem),
 		O::MemoryFill { mem, .. } => I::MemoryFill(*mem),
 
-		O::TableInit { elem_index, table } => {
-			I::TableInit { elem_index: *elem_index, table: *table }
-		},
+		O::TableInit { elem_index, table } =>
+			I::TableInit { elem_index: *elem_index, table: *table },
 		O::ElemDrop { elem_index } => I::ElemDrop(*elem_index),
-		O::TableCopy { dst_table, src_table } => {
-			I::TableCopy { dst_table: *dst_table, src_table: *src_table }
-		},
+		O::TableCopy { dst_table, src_table } =>
+			I::TableCopy { dst_table: *dst_table, src_table: *src_table },
 		O::TableFill { table } => I::TableFill(*table),
 		O::TableGet { table } => I::TableGet(*table),
 		O::TableSet { table } => I::TableSet(*table),
@@ -606,30 +605,22 @@ pub fn op(t: &mut dyn Translator, op: &Operator<'_>) -> Result<Instruction<'stat
 		O::V128Load32Zero { memarg } => I::V128Load32Zero(t.translate_memarg(memarg)?),
 		O::V128Load64Zero { memarg } => I::V128Load64Zero(t.translate_memarg(memarg)?),
 		O::V128Store { memarg } => I::V128Store(t.translate_memarg(memarg)?),
-		O::V128Load8Lane { memarg, lane } => {
-			I::V128Load8Lane { memarg: t.translate_memarg(memarg)?, lane: *lane }
-		},
-		O::V128Load16Lane { memarg, lane } => {
-			I::V128Load16Lane { memarg: t.translate_memarg(memarg)?, lane: *lane }
-		},
-		O::V128Load32Lane { memarg, lane } => {
-			I::V128Load32Lane { memarg: t.translate_memarg(memarg)?, lane: *lane }
-		},
-		O::V128Load64Lane { memarg, lane } => {
-			I::V128Load64Lane { memarg: t.translate_memarg(memarg)?, lane: *lane }
-		},
-		O::V128Store8Lane { memarg, lane } => {
-			I::V128Store8Lane { memarg: t.translate_memarg(memarg)?, lane: *lane }
-		},
-		O::V128Store16Lane { memarg, lane } => {
-			I::V128Store16Lane { memarg: t.translate_memarg(memarg)?, lane: *lane }
-		},
-		O::V128Store32Lane { memarg, lane } => {
-			I::V128Store32Lane { memarg: t.translate_memarg(memarg)?, lane: *lane }
-		},
-		O::V128Store64Lane { memarg, lane } => {
-			I::V128Store64Lane { memarg: t.translate_memarg(memarg)?, lane: *lane }
-		},
+		O::V128Load8Lane { memarg, lane } =>
+			I::V128Load8Lane { memarg: t.translate_memarg(memarg)?, lane: *lane },
+		O::V128Load16Lane { memarg, lane } =>
+			I::V128Load16Lane { memarg: t.translate_memarg(memarg)?, lane: *lane },
+		O::V128Load32Lane { memarg, lane } =>
+			I::V128Load32Lane { memarg: t.translate_memarg(memarg)?, lane: *lane },
+		O::V128Load64Lane { memarg, lane } =>
+			I::V128Load64Lane { memarg: t.translate_memarg(memarg)?, lane: *lane },
+		O::V128Store8Lane { memarg, lane } =>
+			I::V128Store8Lane { memarg: t.translate_memarg(memarg)?, lane: *lane },
+		O::V128Store16Lane { memarg, lane } =>
+			I::V128Store16Lane { memarg: t.translate_memarg(memarg)?, lane: *lane },
+		O::V128Store32Lane { memarg, lane } =>
+			I::V128Store32Lane { memarg: t.translate_memarg(memarg)?, lane: *lane },
+		O::V128Store64Lane { memarg, lane } =>
+			I::V128Store64Lane { memarg: t.translate_memarg(memarg)?, lane: *lane },
 
 		O::V128Const { value } => I::V128Const(value.i128()),
 		O::I8x16Shuffle { lanes } => I::I8x16Shuffle(*lanes),
@@ -867,80 +858,84 @@ pub fn op(t: &mut dyn Translator, op: &Operator<'_>) -> Result<Instruction<'stat
 		O::I16x8RelaxedDotI8x16I7x16S => I::I16x8RelaxedDotI8x16I7x16S,
 		O::I32x4RelaxedDotI8x16I7x16AddS => I::I32x4RelaxedDotI8x16I7x16AddS,
 
-		// Note that these cases are not supported in `wasm_encoder` yet,
-		// and in general `wasmparser` often parses more things than
-		// `wasm_encoder` supports. If these are seen we simply say that
-		// this mutation isn't applicable because `wasm-encoder` can't
-		// create the new function anyway.
-		O::MemoryAtomicNotify { .. }
-		| O::MemoryAtomicWait32 { .. }
-		| O::MemoryAtomicWait64 { .. }
-		| O::I32AtomicLoad { .. }
-		| O::I64AtomicLoad { .. }
-		| O::I32AtomicLoad8U { .. }
-		| O::I32AtomicLoad16U { .. }
-		| O::I64AtomicLoad8U { .. }
-		| O::I64AtomicLoad16U { .. }
-		| O::I64AtomicLoad32U { .. }
-		| O::I32AtomicStore { .. }
-		| O::I64AtomicStore { .. }
-		| O::I32AtomicStore8 { .. }
-		| O::I32AtomicStore16 { .. }
-		| O::I64AtomicStore8 { .. }
-		| O::I64AtomicStore16 { .. }
-		| O::I64AtomicStore32 { .. }
-		| O::I32AtomicRmwAdd { .. }
-		| O::I64AtomicRmwAdd { .. }
-		| O::I32AtomicRmw8AddU { .. }
-		| O::I32AtomicRmw16AddU { .. }
-		| O::I64AtomicRmw8AddU { .. }
-		| O::I64AtomicRmw16AddU { .. }
-		| O::I64AtomicRmw32AddU { .. }
-		| O::I32AtomicRmwSub { .. }
-		| O::I64AtomicRmwSub { .. }
-		| O::I32AtomicRmw8SubU { .. }
-		| O::I32AtomicRmw16SubU { .. }
-		| O::I64AtomicRmw8SubU { .. }
-		| O::I64AtomicRmw16SubU { .. }
-		| O::I64AtomicRmw32SubU { .. }
-		| O::I32AtomicRmwAnd { .. }
-		| O::I64AtomicRmwAnd { .. }
-		| O::I32AtomicRmw8AndU { .. }
-		| O::I32AtomicRmw16AndU { .. }
-		| O::I64AtomicRmw8AndU { .. }
-		| O::I64AtomicRmw16AndU { .. }
-		| O::I64AtomicRmw32AndU { .. }
-		| O::I32AtomicRmwOr { .. }
-		| O::I64AtomicRmwOr { .. }
-		| O::I32AtomicRmw8OrU { .. }
-		| O::I32AtomicRmw16OrU { .. }
-		| O::I64AtomicRmw8OrU { .. }
-		| O::I64AtomicRmw16OrU { .. }
-		| O::I64AtomicRmw32OrU { .. }
-		| O::I32AtomicRmwXor { .. }
-		| O::I64AtomicRmwXor { .. }
-		| O::I32AtomicRmw8XorU { .. }
-		| O::I32AtomicRmw16XorU { .. }
-		| O::I64AtomicRmw8XorU { .. }
-		| O::I64AtomicRmw16XorU { .. }
-		| O::I64AtomicRmw32XorU { .. }
-		| O::I32AtomicRmwXchg { .. }
-		| O::I64AtomicRmwXchg { .. }
-		| O::I32AtomicRmw8XchgU { .. }
-		| O::I32AtomicRmw16XchgU { .. }
-		| O::I64AtomicRmw8XchgU { .. }
-		| O::I64AtomicRmw16XchgU { .. }
-		| O::I64AtomicRmw32XchgU { .. }
-		| O::I32AtomicRmwCmpxchg { .. }
-		| O::I64AtomicRmwCmpxchg { .. }
-		| O::I32AtomicRmw8CmpxchgU { .. }
-		| O::I32AtomicRmw16CmpxchgU { .. }
-		| O::I64AtomicRmw8CmpxchgU { .. }
-		| O::I64AtomicRmw16CmpxchgU { .. }
-		| O::I64AtomicRmw32CmpxchgU { .. }
-		| O::ReturnCall { .. }
-		| O::ReturnCallIndirect { .. }
-		| O::AtomicFence { .. } => return Err(TranslatorError::NoMutationsApplicable),
+		O::CallRef { type_index } => I::CallRef(*type_index),
+		O::ReturnCallRef { type_index } => I::ReturnCallRef(*type_index),
+		O::RefAsNonNull => I::RefAsNonNull,
+		O::BrOnNull { relative_depth } => I::BrOnNull(*relative_depth),
+		O::BrOnNonNull { relative_depth } => I::BrOnNonNull(*relative_depth),
+
+		O::MemoryAtomicNotify { memarg } => I::MemoryAtomicNotify(t.translate_memarg(memarg)?),
+		O::MemoryAtomicWait32 { memarg } => I::MemoryAtomicWait32(t.translate_memarg(memarg)?),
+		O::MemoryAtomicWait64 { memarg } => I::MemoryAtomicWait64(t.translate_memarg(memarg)?),
+		O::I32AtomicLoad { memarg } => I::I32AtomicLoad(t.translate_memarg(memarg)?),
+		O::I32AtomicLoad8U { memarg } => I::I32AtomicLoad8U(t.translate_memarg(memarg)?),
+		O::I32AtomicLoad16U { memarg } => I::I32AtomicLoad16U(t.translate_memarg(memarg)?),
+		O::I64AtomicLoad { memarg } => I::I64AtomicLoad(t.translate_memarg(memarg)?),
+		O::I64AtomicLoad8U { memarg } => I::I64AtomicLoad8U(t.translate_memarg(memarg)?),
+		O::I64AtomicLoad16U { memarg } => I::I64AtomicLoad16U(t.translate_memarg(memarg)?),
+		O::I64AtomicLoad32U { memarg } => I::I64AtomicLoad32U(t.translate_memarg(memarg)?),
+		O::I32AtomicStore { memarg } => I::I32AtomicStore(t.translate_memarg(memarg)?),
+		O::I64AtomicStore { memarg } => I::I64AtomicStore(t.translate_memarg(memarg)?),
+		O::I32AtomicStore8 { memarg } => I::I32AtomicStore8(t.translate_memarg(memarg)?),
+		O::I32AtomicStore16 { memarg } => I::I32AtomicStore16(t.translate_memarg(memarg)?),
+		O::I64AtomicStore8 { memarg } => I::I64AtomicStore8(t.translate_memarg(memarg)?),
+		O::I64AtomicStore16 { memarg } => I::I64AtomicStore16(t.translate_memarg(memarg)?),
+		O::I64AtomicStore32 { memarg } => I::I64AtomicStore32(t.translate_memarg(memarg)?),
+		O::I32AtomicRmwAdd { memarg } => I::I32AtomicRmwAdd(t.translate_memarg(memarg)?),
+		O::I64AtomicRmwAdd { memarg } => I::I64AtomicRmwAdd(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw8AddU { memarg } => I::I32AtomicRmw8AddU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw16AddU { memarg } => I::I32AtomicRmw16AddU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw8AddU { memarg } => I::I64AtomicRmw8AddU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw16AddU { memarg } => I::I64AtomicRmw16AddU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw32AddU { memarg } => I::I64AtomicRmw32AddU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmwSub { memarg } => I::I32AtomicRmwSub(t.translate_memarg(memarg)?),
+		O::I64AtomicRmwSub { memarg } => I::I64AtomicRmwSub(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw8SubU { memarg } => I::I32AtomicRmw8SubU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw16SubU { memarg } => I::I32AtomicRmw16SubU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw8SubU { memarg } => I::I64AtomicRmw8SubU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw16SubU { memarg } => I::I64AtomicRmw16SubU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw32SubU { memarg } => I::I64AtomicRmw32SubU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmwAnd { memarg } => I::I32AtomicRmwAnd(t.translate_memarg(memarg)?),
+		O::I64AtomicRmwAnd { memarg } => I::I64AtomicRmwAnd(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw8AndU { memarg } => I::I32AtomicRmw8AndU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw16AndU { memarg } => I::I32AtomicRmw16AndU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw8AndU { memarg } => I::I64AtomicRmw8AndU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw16AndU { memarg } => I::I64AtomicRmw16AndU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw32AndU { memarg } => I::I64AtomicRmw32AndU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmwOr { memarg } => I::I32AtomicRmwOr(t.translate_memarg(memarg)?),
+		O::I64AtomicRmwOr { memarg } => I::I64AtomicRmwOr(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw8OrU { memarg } => I::I32AtomicRmw8OrU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw16OrU { memarg } => I::I32AtomicRmw16OrU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw8OrU { memarg } => I::I64AtomicRmw8OrU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw16OrU { memarg } => I::I64AtomicRmw16OrU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw32OrU { memarg } => I::I64AtomicRmw32OrU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmwXor { memarg } => I::I32AtomicRmwXor(t.translate_memarg(memarg)?),
+		O::I64AtomicRmwXor { memarg } => I::I64AtomicRmwXor(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw8XorU { memarg } => I::I32AtomicRmw8XorU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw16XorU { memarg } => I::I32AtomicRmw16XorU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw8XorU { memarg } => I::I64AtomicRmw8XorU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw16XorU { memarg } => I::I64AtomicRmw16XorU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw32XorU { memarg } => I::I64AtomicRmw32XorU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmwXchg { memarg } => I::I32AtomicRmwXchg(t.translate_memarg(memarg)?),
+		O::I64AtomicRmwXchg { memarg } => I::I64AtomicRmwXchg(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw8XchgU { memarg } => I::I32AtomicRmw8XchgU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw16XchgU { memarg } => I::I32AtomicRmw16XchgU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw8XchgU { memarg } => I::I64AtomicRmw8XchgU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw16XchgU { memarg } => I::I64AtomicRmw16XchgU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw32XchgU { memarg } => I::I64AtomicRmw32XchgU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmwCmpxchg { memarg } => I::I32AtomicRmwCmpxchg(t.translate_memarg(memarg)?),
+		O::I64AtomicRmwCmpxchg { memarg } => I::I64AtomicRmwCmpxchg(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw8CmpxchgU { memarg } =>
+			I::I32AtomicRmw8CmpxchgU(t.translate_memarg(memarg)?),
+		O::I32AtomicRmw16CmpxchgU { memarg } =>
+			I::I32AtomicRmw16CmpxchgU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw8CmpxchgU { memarg } =>
+			I::I64AtomicRmw8CmpxchgU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw16CmpxchgU { memarg } =>
+			I::I64AtomicRmw16CmpxchgU(t.translate_memarg(memarg)?),
+		O::I64AtomicRmw32CmpxchgU { memarg } =>
+			I::I64AtomicRmw32CmpxchgU(t.translate_memarg(memarg)?),
+		O::AtomicFence => I::AtomicFence,
 	})
 }
 
