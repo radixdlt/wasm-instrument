@@ -261,6 +261,13 @@ impl ModuleInfo {
 
 	/// Validates the WASM binary
 	pub fn validate(&self, features: WasmFeatures) -> Result<()> {
+		if self.code_section_entry_count != self.num_local_functions() {
+			return Err(ModuleInfoError::CodeAndFuncSectionCntMismatch(
+				self.code_section_entry_count,
+				self.num_local_functions(),
+			))
+		}
+
 		// TODO validate_all() creates internal parser and parses the binary again. Rework to
 		// validate while parsing
 		Validator::new_with_features(features).validate_all(&self.bytes())?;

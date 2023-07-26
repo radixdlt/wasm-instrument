@@ -11,6 +11,7 @@ pub enum ModuleInfoError {
 	FunctionDoesNotExist(u32),
 	NoMemorySection,
 	ExportAlreadyExists(String),
+	CodeAndFuncSectionCntMismatch(u32, u32),
 }
 
 impl core::fmt::Display for ModuleInfoError {
