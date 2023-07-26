@@ -5,10 +5,8 @@ use crate::utils::{
 };
 use alloc::vec::Vec;
 use anyhow::{anyhow, Result};
-use wasm_encoder::{
-	CodeSection, ConstExpr, Function, GlobalSection, GlobalType, SectionId, ValType,
-};
-use wasmparser::{FunctionBody, Operator};
+use wasm_encoder::{CodeSection, ConstExpr, Function, SectionId};
+use wasmparser::{FunctionBody, GlobalType, Operator, ValType};
 
 /// Macro to generate preamble and postamble.
 macro_rules! instrument_call {
@@ -129,22 +127,12 @@ pub fn inject(module_info: &mut ModuleInfo, stack_limit: u32) -> Result<Vec<u8>>
 
 /// Generate a new global that will be used for tracking current stack height.
 fn generate_stack_height_global(module: &mut ModuleInfo) -> Result<u32> {
-	let mut global_sec_builder = GlobalSection::new();
-	let index = {
-		let global_sec = module.global_section()?;
-		if let Some(global_sec) = global_sec {
-			for global in &global_sec {
-				DefaultTranslator.translate_global(*global, &mut global_sec_builder)?;
-			}
-			global_sec.len() as u32
-		} else {
-			0
-		}
-	};
+	let index = module.num_local_globals();
 
-	global_sec_builder
-		.global(GlobalType { val_type: ValType::I32, mutable: true }, &ConstExpr::i32_const(0));
-	module.replace_section(SectionId::Global.into(), &global_sec_builder)?;
+	module.add_global(
+		GlobalType { content_type: ValType::I32, mutable: true },
+		&ConstExpr::i32_const(0),
+	)?;
 	Ok(index)
 }
 
