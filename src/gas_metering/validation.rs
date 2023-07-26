@@ -55,12 +55,16 @@ impl ControlFlowGraph {
 		ControlFlowGraph { nodes: Vec::new() }
 	}
 
-	fn get_node(&self, node_id: NodeId) -> &ControlFlowNode {
-		self.nodes.get(node_id).unwrap()
+	fn get_node(&self, node_id: NodeId) -> Result<&ControlFlowNode> {
+		self.nodes
+			.get(node_id)
+			.ok_or_else(|| anyhow!("node {:?} does not exist", node_id))
 	}
 
-	fn get_node_mut(&mut self, node_id: NodeId) -> &mut ControlFlowNode {
-		self.nodes.get_mut(node_id).unwrap()
+	fn get_node_mut(&mut self, node_id: NodeId) -> Result<&mut ControlFlowNode> {
+		self.nodes
+			.get_mut(node_id)
+			.ok_or_else(|| anyhow!("node {:?} does not exist", node_id))
 	}
 
 	fn add_node(&mut self) -> NodeId {
@@ -68,33 +72,39 @@ impl ControlFlowGraph {
 		self.nodes.len() - 1
 	}
 
-	fn increment_actual_cost(&mut self, node_id: NodeId, cost: u64) {
-		self.get_node_mut(node_id).actual_cost += cost;
+	fn increment_actual_cost(&mut self, node_id: NodeId, cost: u64) -> Result<()> {
+		self.get_node_mut(node_id)?.actual_cost += cost;
+		Ok(())
 	}
 
-	fn increment_charged_cost(&mut self, node_id: NodeId, cost: u64) {
-		self.get_node_mut(node_id).charged_cost += cost;
+	fn increment_charged_cost(&mut self, node_id: NodeId, cost: u64) -> Result<()> {
+		self.get_node_mut(node_id)?.charged_cost += cost;
+		Ok(())
 	}
 
-	fn set_first_instr_pos(&mut self, node_id: NodeId, first_instr_pos: usize) {
-		self.get_node_mut(node_id).first_instr_pos = Some(first_instr_pos)
+	fn set_first_instr_pos(&mut self, node_id: NodeId, first_instr_pos: usize) -> Result<()> {
+		self.get_node_mut(node_id)?.first_instr_pos = Some(first_instr_pos);
+		Ok(())
 	}
 
-	fn new_edge(&mut self, from_id: NodeId, target_frame: &ControlFrame) {
+	fn new_edge(&mut self, from_id: NodeId, target_frame: &ControlFrame) -> Result<()> {
 		if target_frame.is_loop {
-			self.new_loopback_edge(from_id, target_frame.entry_node);
+			self.new_loopback_edge(from_id, target_frame.entry_node)?
 		} else {
-			self.new_forward_edge(from_id, target_frame.exit_node);
+			self.new_forward_edge(from_id, target_frame.exit_node)?
 		}
+		Ok(())
 	}
 
-	fn new_forward_edge(&mut self, from_id: NodeId, to_id: NodeId) {
-		self.get_node_mut(from_id).forward_edges.push(to_id)
+	fn new_forward_edge(&mut self, from_id: NodeId, to_id: NodeId) -> Result<()> {
+		self.get_node_mut(from_id)?.forward_edges.push(to_id);
+		Ok(())
 	}
 
-	fn new_loopback_edge(&mut self, from_id: NodeId, to_id: NodeId) {
-		self.get_node_mut(from_id).loopback_edges.push(to_id);
-		self.get_node_mut(to_id).is_loop_target = true;
+	fn new_loopback_edge(&mut self, from_id: NodeId, to_id: NodeId) -> Result<()> {
+		self.get_node_mut(from_id)?.loopback_edges.push(to_id);
+		self.get_node_mut(to_id)?.is_loop_target = true;
+		Ok(())
 	}
 }
 
@@ -134,7 +144,7 @@ fn build_control_flow_graph(
 	let entry_node_id = graph.add_node();
 	let terminal_node_id = graph.add_node();
 
-	graph.set_first_instr_pos(entry_node_id, 0);
+	graph.set_first_instr_pos(entry_node_id, 0)?;
 
 	let mut stack = vec![ControlFrame::new(entry_node_id, terminal_node_id, false)];
 	let mut metered_blocks_iter = blocks.iter().peekable();
@@ -157,12 +167,12 @@ fn build_control_flow_graph(
 		if apply_block {
 			let next_metered_block =
 				metered_blocks_iter.next().expect("peek returned an item; qed");
-			graph.increment_charged_cost(active_node_id, next_metered_block.cost);
+			graph.increment_charged_cost(active_node_id, next_metered_block.cost)?;
 		}
 
 		// Add locals initialization cost to the function block.
 		if cursor == 0 {
-			graph.increment_actual_cost(active_node_id, locals_init_cost.into());
+			graph.increment_actual_cost(active_node_id, locals_init_cost.into())?;
 		}
 
 		let instruction_cost = rules
@@ -171,30 +181,30 @@ fn build_control_flow_graph(
 			as u64;
 		match instruction {
 			Block { .. } => {
-				graph.increment_actual_cost(active_node_id, instruction_cost);
+				graph.increment_actual_cost(active_node_id, instruction_cost)?;
 
 				let exit_node_id = graph.add_node();
 				stack.push(ControlFrame::new(active_node_id, exit_node_id, false));
 			},
 			If { .. } => {
-				graph.increment_actual_cost(active_node_id, instruction_cost);
+				graph.increment_actual_cost(active_node_id, instruction_cost)?;
 
 				let then_node_id = graph.add_node();
 				let exit_node_id = graph.add_node();
 
 				stack.push(ControlFrame::new(then_node_id, exit_node_id, false));
-				graph.new_forward_edge(active_node_id, then_node_id);
-				graph.set_first_instr_pos(then_node_id, cursor + 1);
+				graph.new_forward_edge(active_node_id, then_node_id)?;
+				graph.set_first_instr_pos(then_node_id, cursor + 1)?;
 			},
 			Loop { .. } => {
-				graph.increment_actual_cost(active_node_id, instruction_cost);
+				graph.increment_actual_cost(active_node_id, instruction_cost)?;
 
 				let loop_node_id = graph.add_node();
 				let exit_node_id = graph.add_node();
 
 				stack.push(ControlFrame::new(loop_node_id, exit_node_id, true));
-				graph.new_forward_edge(active_node_id, loop_node_id);
-				graph.set_first_instr_pos(loop_node_id, cursor + 1);
+				graph.new_forward_edge(active_node_id, loop_node_id)?;
+				graph.set_first_instr_pos(loop_node_id, cursor + 1)?;
 			},
 			Else => {
 				let active_frame_idx = stack.len() - 1;
@@ -204,70 +214,70 @@ fn build_control_flow_graph(
 				stack[active_frame_idx].active_node = else_node_id;
 
 				let prev_node_id = stack[prev_frame_idx].active_node;
-				graph.new_forward_edge(prev_node_id, else_node_id);
-				graph.set_first_instr_pos(else_node_id, cursor + 1);
+				graph.new_forward_edge(prev_node_id, else_node_id)?;
+				graph.set_first_instr_pos(else_node_id, cursor + 1)?;
 			},
 			End => {
 				let closing_frame = stack.pop()
 					.expect("module is valid by pre-condition; ends correspond to control stack frames; qed");
 
-				graph.new_forward_edge(active_node_id, closing_frame.exit_node);
-				graph.set_first_instr_pos(closing_frame.exit_node, cursor + 1);
+				graph.new_forward_edge(active_node_id, closing_frame.exit_node)?;
+				graph.set_first_instr_pos(closing_frame.exit_node, cursor + 1)?;
 
 				if let Some(active_frame) = stack.last_mut() {
 					active_frame.active_node = closing_frame.exit_node;
 				}
 			},
 			Br { relative_depth: label } => {
-				graph.increment_actual_cost(active_node_id, instruction_cost);
+				graph.increment_actual_cost(active_node_id, instruction_cost)?;
 
 				let active_frame_idx = stack.len() - 1;
 				let target_frame_idx = active_frame_idx - (*label as usize);
-				graph.new_edge(active_node_id, &stack[target_frame_idx]);
+				graph.new_edge(active_node_id, &stack[target_frame_idx])?;
 
 				// Next instruction is unreachable, but carry on anyway.
 				let new_node_id = graph.add_node();
 				stack[active_frame_idx].active_node = new_node_id;
-				graph.set_first_instr_pos(new_node_id, cursor + 1);
+				graph.set_first_instr_pos(new_node_id, cursor + 1)?;
 			},
 			BrIf { relative_depth: label } => {
-				graph.increment_actual_cost(active_node_id, instruction_cost);
+				graph.increment_actual_cost(active_node_id, instruction_cost)?;
 
 				let active_frame_idx = stack.len() - 1;
 				let target_frame_idx = active_frame_idx - (*label as usize);
-				graph.new_edge(active_node_id, &stack[target_frame_idx]);
+				graph.new_edge(active_node_id, &stack[target_frame_idx])?;
 
 				let new_node_id = graph.add_node();
 				stack[active_frame_idx].active_node = new_node_id;
-				graph.new_forward_edge(active_node_id, new_node_id);
-				graph.set_first_instr_pos(new_node_id, cursor + 1);
+				graph.new_forward_edge(active_node_id, new_node_id)?;
+				graph.set_first_instr_pos(new_node_id, cursor + 1)?;
 			},
 			BrTable { targets: br_table_data } => {
-				graph.increment_actual_cost(active_node_id, instruction_cost);
+				graph.increment_actual_cost(active_node_id, instruction_cost)?;
 
 				let active_frame_idx = stack.len() - 1;
 
 				let r = br_table_data.targets().collect::<wasmparser::Result<Vec<u32>>>()?;
 				for label in [br_table_data.default()].iter().chain(r.iter()) {
 					let target_frame_idx = active_frame_idx - (*label as usize);
-					graph.new_edge(active_node_id, &stack[target_frame_idx]);
+					graph.new_edge(active_node_id, &stack[target_frame_idx])?;
 				}
 
 				let new_node_id = graph.add_node();
 				stack[active_frame_idx].active_node = new_node_id;
-				graph.set_first_instr_pos(new_node_id, cursor + 1);
+				graph.set_first_instr_pos(new_node_id, cursor + 1)?;
 			},
 			Return => {
-				graph.increment_actual_cost(active_node_id, instruction_cost);
+				graph.increment_actual_cost(active_node_id, instruction_cost)?;
 
-				graph.new_forward_edge(active_node_id, terminal_node_id);
+				graph.new_forward_edge(active_node_id, terminal_node_id)?;
 
 				let active_frame_idx = stack.len() - 1;
 				let new_node_id = graph.add_node();
 				stack[active_frame_idx].active_node = new_node_id;
-				graph.set_first_instr_pos(new_node_id, cursor + 1);
+				graph.set_first_instr_pos(new_node_id, cursor + 1)?;
 			},
-			_ => graph.increment_actual_cost(active_node_id, instruction_cost),
+			_ => graph.increment_actual_cost(active_node_id, instruction_cost)?,
 		}
 	}
 
@@ -284,15 +294,15 @@ fn build_control_flow_graph(
 /// control flow graph are correct with respect to the function body.
 ///
 /// In the worst case, this runs in time exponential in the size of the graph.
-fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> bool {
+fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> Result<bool> {
 	fn visit(
 		graph: &ControlFlowGraph,
 		node_id: NodeId,
 		mut total_actual: u64,
 		mut total_charged: u64,
 		loop_costs: &mut Map<NodeId, (u64, u64)>,
-	) -> bool {
-		let node = graph.get_node(node_id);
+	) -> Result<bool> {
+		let node = graph.get_node(node_id)?;
 
 		total_actual += node.actual_cost;
 		total_charged += node.charged_cost;
@@ -302,7 +312,7 @@ fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> bool {
 		}
 
 		if node.forward_edges.is_empty() && total_actual != total_charged {
-			return false
+			return Ok(false)
 		}
 
 		for loop_node_id in node.loopback_edges.iter() {
@@ -310,13 +320,13 @@ fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> bool {
 				.get_mut(loop_node_id)
 				.expect("cannot arrive at loopback edge without visiting loop entry node");
 			if loop_actual != loop_charged {
-				return false
+				return Ok(false)
 			}
 		}
 
 		for next_node_id in node.forward_edges.iter() {
-			if !visit(graph, *next_node_id, total_actual, total_charged, loop_costs) {
-				return false
+			if !visit(graph, *next_node_id, total_actual, total_charged, loop_costs)? {
+				return Ok(false)
 			}
 		}
 
@@ -324,7 +334,7 @@ fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> bool {
 			loop_costs.remove(&node_id);
 		}
 
-		true
+		Ok(true)
 	}
 
 	// Recursively explore all paths through the execution graph starting from the entry node.
@@ -342,7 +352,7 @@ fn validate_metering_injections(
 	locals_count: u32,
 ) -> Result<bool> {
 	let graph = build_control_flow_graph(body, rules, blocks, locals_count)?;
-	Ok(validate_graph_gas_costs(&graph))
+	validate_graph_gas_costs(&graph)
 }
 
 mod tests {
