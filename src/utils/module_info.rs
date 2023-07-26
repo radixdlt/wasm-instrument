@@ -65,7 +65,7 @@ pub struct ModuleInfo {
 	// The main idea is to maintain the order of the sections in the input Wasm.
 	pub export_names: BTreeSet<String>,
 
-	pub func_bodies_count: u32,
+	pub code_section_entry_count: u32,
 	pub exports_count: u32,
 	pub exports_global_count: u32,
 
@@ -132,7 +132,7 @@ impl ModuleInfo {
 
 			match payload {
 				Payload::CodeSectionStart { count, range, size: _ } => {
-					info.func_bodies_count = count;
+					info.code_section_entry_count = count;
 					info.section(SectionId::Code.into(), range.clone(), input_wasm);
 					parser.skip_section();
 					// update slice, bypass the section
@@ -410,7 +410,7 @@ impl ModuleInfo {
 
 			// Write new function body in Code section
 			code_builder.function(func_body);
-			self.func_bodies_count += 1;
+			self.code_section_entry_count += 1;
 		}
 		self.replace_section(SectionId::Function.into(), &function_builder)?;
 		self.replace_section(SectionId::Code.into(), &code_builder)
