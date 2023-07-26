@@ -118,6 +118,7 @@ pub fn update_custom_section_function_indices(
 					let map = rebuild_name_map(element)?;
 					name_section_builder.elements(&map);
 				},
+				// TODO implement below sections
 				wasmparser::Name::Module { name, .. } => {
 					todo!("Name Module section not supported - {:?}", name);
 				},
