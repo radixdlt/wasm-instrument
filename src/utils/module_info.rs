@@ -348,7 +348,7 @@ impl ModuleInfo {
 		let mut section_builder = wasm_encoder::ExportSection::new();
 
 		for export in self.export_section()?.unwrap_or(vec![]) {
-			let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
+			let export_kind = DefaultTranslator.translate_export_kind(export.kind)?;
 			section_builder.export(export.name, export_kind, export.index);
 		}
 
@@ -608,15 +608,12 @@ impl ModuleInfo {
 
 // Then insert metering calls into a sequence of instructions given the block locations and costs.
 pub fn copy_locals(func_body: &FunctionBody) -> Result<Vec<(u32, wasm_encoder::ValType)>> {
-	let mut local_reader = func_body.get_locals_reader()?;
-	// Get current locals and map to encoder types
-	let current_locals: Vec<(u32, wasm_encoder::ValType)> = (0..local_reader.get_count())
-		.map(|_| {
-			let (count, ty) = local_reader.read().unwrap();
-			(count, DefaultTranslator.translate_ty(&ty).unwrap())
-		})
-		.collect::<Vec<(u32, wasm_encoder::ValType)>>();
-
+	let local_reader = func_body.get_locals_reader()?;
+	let mut current_locals = vec![];
+	for local in local_reader.into_iter() {
+		let (count, ty) = local?;
+		current_locals.push((count, DefaultTranslator.translate_ty(&ty)?));
+	}
 	Ok(current_locals)
 }
 
