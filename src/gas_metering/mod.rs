@@ -321,9 +321,7 @@ pub fn inject<R: Rules, B: Backend>(
 					export_index,
 				);
 			}
-			module_info
-				.replace_section(SectionId::Export.into(), &export_sec_builder)
-				.unwrap();
+			module_info.replace_section(SectionId::Export.into(), &export_sec_builder)?;
 		}
 	}
 
@@ -628,11 +626,10 @@ fn determine_metered_blocks<R: Rules>(
 	counter.increment(locals_init_cost)?;
 
 	let operators = func_body
-		.get_operators_reader()
-		.unwrap()
+		.get_operators_reader()?
 		.into_iter()
-		.collect::<wasmparser::Result<Vec<Operator>>>()
-		.unwrap();
+		.collect::<wasmparser::Result<Vec<Operator>>>()?;
+
 	for (cursor, instruction) in operators.iter().enumerate() {
 		let instruction_cost = rules
 			.instruction_cost(instruction)
@@ -682,7 +679,7 @@ fn determine_metered_blocks<R: Rules>(
 				let active_index = counter
 					.active_control_block_index()
 					.ok_or_else(|| anyhow!("index not found"))?;
-				let r = br_table_data.targets().collect::<wasmparser::Result<Vec<u32>>>().unwrap();
+				let r = br_table_data.targets().collect::<wasmparser::Result<Vec<u32>>>()?;
 				let target_indices = [br_table_data.default()]
 					.iter()
 					.chain(r.iter())
@@ -730,8 +727,7 @@ fn insert_metering_calls(
 	// instructions one by one and injecting new ones as required.
 	let mut block_iter = blocks.into_iter().peekable();
 	let operators = func_body
-		.get_operators_reader()
-		.unwrap()
+		.get_operators_reader()?
 		.into_iter()
 		.collect::<wasmparser::Result<Vec<Operator>>>()?;
 	for (original_pos, instr) in operators.iter().enumerate() {
