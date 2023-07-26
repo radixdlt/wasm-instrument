@@ -132,11 +132,6 @@ pub trait Translator {
 	fn translate_memarg(&mut self, arg: &wasmparser::MemArg) -> Result<MemArg> {
 		memarg(self.as_obj(), arg)
 	}
-
-	fn remap(&mut self, item: Item, idx: u32) -> Result<u32> {
-		let _ = item;
-		Ok(idx)
-	}
 }
 
 pub struct DefaultTranslator;
@@ -209,11 +204,11 @@ pub fn global_type(
 }
 
 #[allow(dead_code)]
-pub fn tag_type(t: &mut dyn Translator, ty: &wasmparser::TagType) -> Result<wasm_encoder::TagType> {
-	Ok(wasm_encoder::TagType {
-		kind: TagKind::Exception,
-		func_type_idx: t.remap(Item::Type, ty.func_type_idx)?,
-	})
+pub fn tag_type(
+	_t: &mut dyn Translator,
+	ty: &wasmparser::TagType,
+) -> Result<wasm_encoder::TagType> {
+	Ok(wasm_encoder::TagType { kind: TagKind::Exception, func_type_idx: ty.func_type_idx })
 }
 
 pub fn ty(t: &mut dyn Translator, ty: &wasmparser::ValType) -> Result<ValType> {
@@ -231,7 +226,7 @@ pub fn ref_ty(t: &mut dyn Translator, ty: &wasmparser::RefType) -> Result<RefTyp
 	Ok(RefType { nullable: ty.is_nullable(), heap_type: t.translate_heap_ty(&ty.heap_type())? })
 }
 
-pub fn heap_ty(t: &mut dyn Translator, ty: &wasmparser::HeapType) -> Result<HeapType> {
+pub fn heap_ty(_t: &mut dyn Translator, ty: &wasmparser::HeapType) -> Result<HeapType> {
 	match ty {
 		wasmparser::HeapType::Func => Ok(HeapType::Func),
 		wasmparser::HeapType::Extern => Ok(HeapType::Extern),
@@ -243,7 +238,7 @@ pub fn heap_ty(t: &mut dyn Translator, ty: &wasmparser::HeapType) -> Result<Heap
 		wasmparser::HeapType::Struct => Ok(HeapType::Struct),
 		wasmparser::HeapType::Array => Ok(HeapType::Array),
 		wasmparser::HeapType::I31 => Ok(HeapType::I31),
-		wasmparser::HeapType::Indexed(i) => Ok(HeapType::Indexed(t.remap(Item::Type, *i)?)),
+		wasmparser::HeapType::Indexed(i) => Ok(HeapType::Indexed(*i)),
 	}
 }
 
@@ -323,10 +318,7 @@ pub fn element(
 	let exprs;
 	let elements = match element.items {
 		wasmparser::ElementItems::Functions(reader) => {
-			functions = reader
-				.into_iter()
-				.map(|f| t.remap(Item::Function, f?))
-				.collect::<wasmparser::Result<Vec<_>, _>>()?;
+			functions = reader.into_iter().collect::<wasmparser::Result<Vec<_>, _>>()?;
 			Elements::Functions(&functions)
 		},
 		wasmparser::ElementItems::Expressions(reader) => {
@@ -943,16 +935,12 @@ pub fn block_type(t: &mut dyn Translator, ty: &wasmparser::BlockType) -> Result<
 	match ty {
 		wasmparser::BlockType::Empty => Ok(BlockType::Empty),
 		wasmparser::BlockType::Type(ty) => Ok(BlockType::Result(t.translate_ty(ty)?)),
-		wasmparser::BlockType::FuncType(f) => Ok(BlockType::FunctionType(t.remap(Item::Type, *f)?)),
+		wasmparser::BlockType::FuncType(f) => Ok(BlockType::FunctionType(*f)),
 	}
 }
 
-pub fn memarg(t: &mut dyn Translator, memarg: &wasmparser::MemArg) -> Result<MemArg> {
-	Ok(MemArg {
-		offset: memarg.offset,
-		align: memarg.align.into(),
-		memory_index: t.remap(Item::Memory, memarg.memory)?,
-	})
+pub fn memarg(_t: &mut dyn Translator, memarg: &wasmparser::MemArg) -> Result<MemArg> {
+	Ok(MemArg { offset: memarg.offset, align: memarg.align.into(), memory_index: memarg.memory })
 }
 
 #[allow(dead_code)]
@@ -965,10 +953,7 @@ pub fn data(t: &mut dyn Translator, data: wasmparser::Data<'_>, s: &mut DataSect
 				&wasmparser::ValType::I32,
 				ConstExprKind::DataOffset,
 			)?;
-			DataSegmentMode::Active {
-				memory_index: t.remap(Item::Memory, *memory_index)?,
-				offset: &offset,
-			}
+			DataSegmentMode::Active { memory_index: *memory_index, offset: &offset }
 		},
 		DataKind::Passive => DataSegmentMode::Passive,
 	};
