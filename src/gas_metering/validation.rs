@@ -9,8 +9,8 @@
 //! the worst case.
 
 use super::{MeteredBlock, Rules};
+use alloc::{collections::BTreeMap as Map, vec, vec::Vec};
 use anyhow::{anyhow, Result};
-use std::collections::BTreeMap as Map;
 use wasmparser::Operator;
 
 /// An ID for a node in a ControlFlowGraph.
@@ -360,6 +360,7 @@ mod tests {
 		super::{copy_locals, determine_metered_blocks, ConstantCostRules},
 		validate_metering_injections,
 	};
+	use alloc::vec::Vec;
 	use binaryen::tools::translate_to_fuzz_mvp;
 	use rand::{thread_rng, RngCore};
 	use wasmparser::{CodeSectionReader, FunctionBody, Payload::CodeSectionStart};

@@ -17,7 +17,7 @@ use crate::utils::{
 	module_info::{copy_locals, truncate_len_from_encoder, ModuleInfo},
 	translator::{DefaultTranslator, Translator},
 };
-use alloc::{vec, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
 use anyhow::{anyhow, Result};
 use core::{cmp::min, mem, num::NonZeroU32};
 use wasm_encoder::{
@@ -204,7 +204,7 @@ pub fn inject<R: Rules, B: Backend>(
 			)?;
 
 			module_info.add_exports(&[(
-				global_name.to_string(),
+				String::from(global_name),
 				ExportKind::Global,
 				gas_global_idx,
 			)])?;

@@ -351,7 +351,6 @@ impl ModuleInfo {
 	}
 
 	pub fn add_exports(&mut self, exports: &[(String, ExportKind, u32)]) -> Result<()> {
-		//					  name: &str, kind: ExportKind, index: u32) -> Result<()> {
 		let mut section_builder = wasm_encoder::ExportSection::new();
 
 		for export in self.export_section()?.unwrap_or(vec![]) {
@@ -365,9 +364,9 @@ impl ModuleInfo {
 				if let ExportKind::Global = kind {
 					self.exports_global_count += 1;
 				}
-				self.export_names.insert(name.to_string());
+				self.export_names.insert(String::from(name));
 			} else {
-				return Err(ModuleInfoError::ExportAlreadyExists(name.to_string()))
+				return Err(ModuleInfoError::ExportAlreadyExists(String::from(name)))
 			}
 		}
 		self.replace_section(SectionId::Export.into(), &section_builder)
