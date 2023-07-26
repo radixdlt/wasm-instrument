@@ -1,46 +1,31 @@
-use crate::utils::{
-	module_info::ModuleInfo,
-	translator::{DefaultTranslator, Translator},
-};
+use crate::utils::module_info::ModuleInfo;
 use alloc::{format, vec, vec::Vec};
-use wasm_encoder::{ExportKind, ExportSection, SectionId};
+use anyhow::Result;
+use wasm_encoder::ExportKind;
 
 /// Export all declared mutable globals as `prefix_index`.
 ///
 /// This will export all internal mutable globals under the name of
 /// concat(`prefix`, `"_"`, `i`) where i is the index inside the range of
 /// [0..total number of internal mutable globals].
-pub fn export_mutable_globals(module_info: &mut ModuleInfo, prefix: &str) {
+pub fn export_mutable_globals(module_info: &mut ModuleInfo, prefix: &str) -> Result<()> {
 	let mutable_globals_to_export = module_info
-		.global_section()
-		.unwrap()
+		.global_section()?
 		.unwrap_or(vec![])
 		.iter()
 		.enumerate()
 		.filter_map(|(index, global)| if global.ty.mutable { Some(index as u32) } else { None })
 		.collect::<Vec<u32>>();
 
-	let mut export_sec_builder = ExportSection::new();
-
-	// Recreate current export section
-	for export in module_info.export_section().unwrap().unwrap_or(vec![]) {
-		let export_kind = DefaultTranslator.translate_export_kind(export.kind).unwrap();
-		export_sec_builder.export(export.name, export_kind, export.index);
-	}
-
+	let mut exports = vec![];
 	// Add mutable globals to the export section
 	for (symbol_index, export) in mutable_globals_to_export.into_iter().enumerate() {
 		let name = format!("{}_{}", prefix, symbol_index);
-		export_sec_builder.export(
-			&name,
-			ExportKind::Global,
-			module_info.imported_globals_count + export,
-		);
+		exports.push((name, ExportKind::Global, module_info.imported_globals_count + export))
 	}
+	module_info.add_exports(&exports)?;
 
-	module_info
-		.replace_section(SectionId::Export.into(), &export_sec_builder)
-		.unwrap();
+	Ok(())
 }
 
 #[cfg(test)]
@@ -60,7 +45,7 @@ mod tests {
 				let mut input_module = parse_wat($input);
 				let expected_module = parse_wat($expected);
 
-				export_mutable_globals(&mut input_module, "exported_internal_global");
+				export_mutable_globals(&mut input_module, "exported_internal_global").unwrap();
 
 				let actual_bytes = input_module.bytes();
 				let expected_bytes = expected_module.bytes();
@@ -131,6 +116,18 @@ mod tests {
 			(global (;0;) i32 (i32.const 1))
 			(global (;1;) (mut i32) (i32.const 0))
 			(export "exported_internal_global_0" (global 2)))
+		"#
+	}
+
+	test_export_global! {
+		name = no_global;
+		input = r#"
+		(module
+			(import "env" "global" (global $global i64)))
+		"#;
+		expected = r#"
+		(module
+			(import "env" "global" (global $global i64)))
 		"#
 	}
 }
