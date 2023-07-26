@@ -323,13 +323,15 @@ mod tests {
 	#[test]
 	fn test_with_params_and_result() {
 		let mut module_info = parse_wat(
-			r#"(module
-						(func (export "i32.add") (param i32 i32) (result i32)
-							get_local 0
-							get_local 1
-							i32.add
-						)
-					)"#,
+			r#"
+(module
+	(func (export "i32.add") (param i32 i32) (result i32)
+		get_local 0
+		get_local 1
+		i32.add
+	)
+)
+"#,
 		);
 
 		let inject_raw_wasm =
