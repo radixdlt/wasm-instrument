@@ -331,10 +331,7 @@ pub fn inject<R: Rules, B: Backend>(
 		if let GasMeter::External { .. } = gas_meter {
 			let mut ele_sec_builder = ElementSection::new();
 
-			for elem in module_info
-				.element_section()?
-				.ok_or_else(|| anyhow!("no element_section section"))?
-			{
+			for elem in module_info.element_section()?.expect("no element_section section") {
 				DefaultTranslator.translate_element(elem, &mut ele_sec_builder)?;
 			}
 			module_info.replace_section(SectionId::Element.into(), &ele_sec_builder)?;
@@ -380,7 +377,7 @@ pub fn inject<R: Rules, B: Backend>(
 ///   i32.sub
 ///   tee_local 0
 ///   br_if 0
-/// endgG
+/// end
 /// ```
 ///
 /// The start of the block is `i32.const 1`.
@@ -576,8 +573,8 @@ fn inject_grow_counter(
 	while !operator_reader.eof() {
 		let op = operator_reader.read()?;
 		match op {
+			// TODO Bulk memories
 			Operator::MemoryGrow { .. } => {
-				//todo Bulk memories
 				new_func.instruction(&wasm_encoder::Instruction::Call(grow_counter_func));
 				counter += 1;
 			},

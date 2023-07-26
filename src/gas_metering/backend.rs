@@ -125,6 +125,7 @@ pub mod mutable_global {
 				Operator::End,
 			];
 			operators.iter().for_each(|op| {
+				// Below unwrap is safe, all operators are covered
 				let instr = DefaultTranslator.translate_op(op).unwrap();
 				func.instruction(&instr);
 			});
