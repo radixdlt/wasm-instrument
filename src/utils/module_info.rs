@@ -343,7 +343,8 @@ impl ModuleInfo {
 		Ok(())
 	}
 
-	pub fn add_export(&mut self, name: &str, kind: ExportKind, index: u32) -> Result<()> {
+	pub fn add_exports(&mut self, exports: &[(String, ExportKind, u32)]) -> Result<()> {
+		//					  name: &str, kind: ExportKind, index: u32) -> Result<()> {
 		let mut section_builder = wasm_encoder::ExportSection::new();
 
 		for export in self.export_section()?.unwrap_or(vec![]) {
@@ -351,11 +352,17 @@ impl ModuleInfo {
 			section_builder.export(export.name, export_kind, export.index);
 		}
 
-		section_builder.export(name, kind, index);
-		if let ExportKind::Global = kind {
-			self.exports_global_count += 1;
+		for (name, kind, index) in exports {
+			if !self.export_names.contains(name) {
+				section_builder.export(name, *kind, *index);
+				if let ExportKind::Global = kind {
+					self.exports_global_count += 1;
+				}
+				self.export_names.insert(name.to_string());
+			} else {
+				return Err(ModuleInfoError::ExportAlreadyExists(name.to_string()))
+			}
 		}
-		self.export_names.insert(name.into());
 		self.replace_section(SectionId::Export.into(), &section_builder)
 	}
 

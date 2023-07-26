@@ -10,6 +10,7 @@ pub enum ModuleInfoError {
 	TypeDoesNotExist(u32),
 	FunctionDoesNotExist(u32),
 	NoMemorySection,
+	ExportAlreadyExists(String),
 }
 
 impl core::fmt::Display for ModuleInfoError {

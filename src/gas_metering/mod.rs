@@ -207,7 +207,11 @@ pub fn inject<R: Rules, B: Backend>(
 				&wasm_encoder::ConstExpr::i64_const(0),
 			)?;
 
-			module_info.add_export(global_name, ExportKind::Global, gas_global_idx)?;
+			module_info.add_exports(&[(
+				global_name.to_string(),
+				ExportKind::Global,
+				gas_global_idx,
+			)])?;
 
 			// Inject the local gas function
 			let ty = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
