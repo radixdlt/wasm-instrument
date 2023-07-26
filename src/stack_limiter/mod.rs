@@ -1,6 +1,4 @@
 //! Contains the code for the stack height limiter instrumentation.
-#[cfg(not(feature = "ignore_custom_section"))]
-use crate::utils::transform::process_custom_section;
 use crate::utils::{
 	module_info::{copy_locals, ModuleInfo},
 	translator::{DefaultTranslator, Translator},
@@ -125,9 +123,6 @@ pub fn inject(module_info: &mut ModuleInfo, stack_limit: u32) -> Result<Vec<u8>>
 
 	instrument_functions(&mut ctx, module_info)?;
 	thunk::generate_thunks(&mut ctx, module_info)?;
-
-	#[cfg(not(feature = "ignore_custom_section"))]
-	process_custom_section(module_info, None)?;
 
 	Ok(module_info.bytes())
 }

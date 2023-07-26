@@ -27,13 +27,13 @@ fn rebuild_indirect_name_map(
 	Ok(encoded_map)
 }
 
-/// - Update function indices in Custom Name section Increment indices greater or equal than given
-///   one (incrementing by 1 because it is assumed one function has been added before the given
-///   index)
+/// Update function indices in Custom Name section
+/// - Increment indices greater or equal than given one incrementing by 1 because it is assumed one
+///   function has been added before the given index)
 /// - Rebuild remaining section items
-pub fn process_custom_section(
+pub fn update_custom_section_function_indices(
 	module_info: &mut ModuleInfo,
-	update_func_idx: Option<u32>,
+	update_func_idx: u32,
 ) -> Result<()> {
 	if let Some(custom_section) = module_info.raw_sections.get_mut(&SectionId::Custom.into()) {
 		// ATM the only supported custom section is "name"
@@ -45,8 +45,19 @@ pub fn process_custom_section(
 		// 	1, 9, 1, 0, 6, 84, 101, 115, 116, 95, 102,  // Functions name mapping
 		// 	2, 6, 1, 0, 1, 0, 1, 48 ]                   // Locals name mapping
 
+		let data_len = custom_section.data.len();
+		if data_len == 0 {
+			return Err(anyhow!("Custom section data length is 0"))
+		}
 		let data_offset = 1 + custom_section.data[0] as usize;
 
+		if data_offset > data_len {
+			return Err(anyhow!(
+				"Invalid data offset {:?}, greater than data length {:?}",
+				data_offset,
+				data_len
+			))
+		}
 		if &custom_section.data[1..data_offset] != "name".as_bytes() {
 			return Err(anyhow!("Not supported custom section"))
 		}
@@ -66,12 +77,8 @@ pub fn process_custom_section(
 					let mut new_map = wasm_encoder::NameMap::new();
 					for naming in name_map.into_iter() {
 						let naming = naming?;
-						let idx = if let Some(idx) = update_func_idx {
-							if naming.index >= idx {
-								naming.index + 1
-							} else {
-								naming.index
-							}
+						let idx = if naming.index >= update_func_idx {
+							naming.index + 1
 						} else {
 							naming.index
 						};
