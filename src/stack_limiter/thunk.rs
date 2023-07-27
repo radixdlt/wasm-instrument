@@ -156,7 +156,6 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 		}
 
 		let offset;
-		//todo edit element is little complex,
 		let mode = match elem.kind {
 			ElementKind::Active { table_index, offset_expr } => {
 				offset = DefaultTranslator.translate_const_expr(
