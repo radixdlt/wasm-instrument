@@ -15,15 +15,19 @@ mod validation;
 use crate::utils::transform::update_custom_section_function_indices;
 use crate::utils::{
 	module_info::{copy_locals, truncate_len_from_encoder, ModuleInfo},
-	translator::{DefaultTranslator, Translator},
+	translator::{ConstExprKind, DefaultTranslator, Translator},
 };
 use alloc::{string::String, vec, vec::Vec};
 use anyhow::{anyhow, Result};
 use core::{cmp::min, mem, num::NonZeroU32};
 use wasm_encoder::{
-	ElementSection, ExportKind, ExportSection, Function, Instruction, SectionId, StartSection,
+	ElementMode, ElementSection, ElementSegment, Elements, ExportKind, ExportSection, Function,
+	Instruction, SectionId, StartSection,
 };
-use wasmparser::{ExternalKind, FuncType, FunctionBody, GlobalType, Operator, Type, ValType};
+use wasmparser::{
+	ElementItems, ElementKind, ExternalKind, FuncType, FunctionBody, GlobalType, Operator, Type,
+	ValType,
+};
 
 /// An interface that describes instruction costs.
 pub trait Rules {
@@ -330,8 +334,44 @@ pub fn inject<R: Rules, B: Backend>(
 		if let GasMeter::External { .. } = gas_meter {
 			let mut ele_sec_builder = ElementSection::new();
 
+			// TODO rework updating Element section here and there to avoid code repetition
 			for elem in module_info.element_section()?.expect("no element_section section") {
-				DefaultTranslator.translate_element(elem, &mut ele_sec_builder)?;
+				let mut functions = vec![];
+				if let ElementItems::Functions(func_indexes) = elem.items {
+					for func_idx in func_indexes {
+						let mut func_idx = func_idx?;
+						if func_idx >= gas_func_idx {
+							func_idx += 1
+						}
+						functions.push(func_idx);
+					}
+				}
+
+				let offset;
+				let mode = match elem.kind {
+					ElementKind::Active { table_index, offset_expr } => {
+						offset = DefaultTranslator.translate_const_expr(
+							&offset_expr,
+							&ValType::I32,
+							ConstExprKind::ElementOffset,
+						)?;
+
+						ElementMode::Active { table: table_index, offset: &offset }
+					},
+					ElementKind::Passive => ElementMode::Passive,
+					ElementKind::Declared => ElementMode::Declared,
+				};
+
+				let element_type = DefaultTranslator.translate_ref_ty(&elem.ty)?;
+				let elements = Elements::Functions(&functions);
+
+				ele_sec_builder.segment(ElementSegment {
+					mode,
+					/// The element type.
+					element_type,
+					/// The element functions.
+					elements,
+				});
 			}
 			module_info.replace_section(SectionId::Element.into(), &ele_sec_builder)?;
 		}
