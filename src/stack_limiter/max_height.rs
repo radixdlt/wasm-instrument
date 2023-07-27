@@ -1,9 +1,8 @@
-use super::resolve_func_type;
 use alloc::vec::Vec;
-use parity_wasm::elements::{self, BlockType, Type};
 
-#[cfg(feature = "sign_ext")]
-use parity_wasm::elements::SignExtInstruction;
+use crate::utils::module_info::ModuleInfo;
+use anyhow::{anyhow, Result};
+use wasmparser::{BlockType, Type};
 
 // The cost in stack items that should be charged per call of a function. This is
 // is a static cost that is added to each function call. This makes sense because even
@@ -52,18 +51,25 @@ impl Stack {
 
 	/// Returns a reference to a frame by specified depth relative to the top of
 	/// control stack.
-	fn frame(&self, rel_depth: u32) -> Result<&Frame, &'static str> {
+	fn frame(&self, rel_depth: u32) -> Result<&Frame> {
 		let control_stack_height: usize = self.control_stack.len();
-		let last_idx = control_stack_height.checked_sub(1).ok_or("control stack is empty")?;
-		let idx = last_idx.checked_sub(rel_depth as usize).ok_or("control stack out-of-bounds")?;
+		let last_idx = control_stack_height
+			.checked_sub(1)
+			.ok_or_else(|| anyhow!("control stack is empty"))?;
+		let idx = last_idx
+			.checked_sub(rel_depth as usize)
+			.ok_or_else(|| anyhow!("control stack out-of-bounds"))?;
 		Ok(&self.control_stack[idx])
 	}
 
 	/// Mark successive instructions as unreachable.
 	///
 	/// This effectively makes stack polymorphic.
-	fn mark_unreachable(&mut self) -> Result<(), &'static str> {
-		let top_frame = self.control_stack.last_mut().ok_or("stack must be non-empty")?;
+	fn mark_unreachable(&mut self) -> Result<()> {
+		let top_frame = self
+			.control_stack
+			.last_mut()
+			.ok_or_else(|| anyhow!("stack must be non-empty"))?;
 		top_frame.is_polymorphic = true;
 		Ok(())
 	}
@@ -76,8 +82,8 @@ impl Stack {
 	/// Pop control frame from the control stack.
 	///
 	/// Returns `Err` if the control stack is empty.
-	fn pop_frame(&mut self) -> Result<Frame, &'static str> {
-		self.control_stack.pop().ok_or("stack must be non-empty")
+	fn pop_frame(&mut self) -> Result<Frame> {
+		self.control_stack.pop().ok_or_else(|| anyhow!("stack must be non-empty"))
 	}
 
 	/// Truncate the height of value stack to the specified height.
@@ -88,8 +94,9 @@ impl Stack {
 	/// Push specified number of values into the value stack.
 	///
 	/// Returns `Err` if the height overflow usize value.
-	fn push_values(&mut self, value_count: u32) -> Result<(), &'static str> {
-		self.height = self.height.checked_add(value_count).ok_or("stack overflow")?;
+	fn push_values(&mut self, value_count: u32) -> Result<()> {
+		self.height =
+			self.height.checked_add(value_count).ok_or_else(|| anyhow!("stack overflow"))?;
 		Ok(())
 	}
 
@@ -97,7 +104,7 @@ impl Stack {
 	///
 	/// Returns `Err` if the stack happen to be negative value after
 	/// values popped.
-	fn pop_values(&mut self, value_count: u32) -> Result<(), &'static str> {
+	fn pop_values(&mut self, value_count: u32) -> Result<()> {
 		if value_count == 0 {
 			return Ok(())
 		}
@@ -110,44 +117,37 @@ impl Stack {
 				return if top_frame.is_polymorphic {
 					Ok(())
 				} else {
-					return Err("trying to pop more values than pushed")
+					return Err(anyhow!("trying to pop more values than pushed"))
 				}
 			}
 		}
 
-		self.height = self.height.checked_sub(value_count).ok_or("stack underflow")?;
+		self.height =
+			self.height.checked_sub(value_count).ok_or_else(|| anyhow!("stack underflow"))?;
 
 		Ok(())
 	}
 }
 
 /// This function expects the function to be validated.
-pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static str> {
-	use parity_wasm::elements::Instruction::*;
-
-	let func_section = module.function_section().ok_or("No function section")?;
-	let code_section = module.code_section().ok_or("No code section")?;
-	let type_section = module.type_section().ok_or("No type section")?;
+pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
+	use wasmparser::Operator::*;
 
 	// Get a signature and a body of the specified function.
-	let func_sig_idx = func_section
-		.entries()
+	let wasmparser::Type::Func(func_signature) =
+		module.get_type_by_func_idx(module.imported_functions_count + func_idx)?
+	else {
+		// TODO: Type::Array(_)
+		todo!("Array type not supported yet");
+	};
+	let mut body_reader = module
+		.code_section()?
+		.ok_or_else(|| anyhow!("no code section"))?
 		.get(func_idx as usize)
-		.ok_or("Function is not found in func section")?
-		.type_ref();
-	let Type::Function(func_signature) = type_section
-		.types()
-		.get(func_sig_idx as usize)
-		.ok_or("Function is not found in func section")?;
-	let body = code_section
-		.bodies()
-		.get(func_idx as usize)
-		.ok_or("Function body for the index isn't found")?;
-	let instructions = body.code();
-
+		.ok_or_else(|| anyhow!("function body for the index isn't found"))?
+		.get_operators_reader()?;
 	let mut stack = Stack::new();
 	let mut max_height: u32 = 0;
-	let mut pc = 0;
 
 	// Add implicit frame for the function. Breaks to this frame and execution of
 	// the last end should deal with this frame.
@@ -159,26 +159,39 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 		start_height: 0,
 	});
 
-	loop {
-		if pc >= instructions.elements().len() {
-			break
-		}
-
+	while !body_reader.eof() {
+		let opcode = body_reader.read()?;
 		// If current value stack is higher than maximal height observed so far,
 		// save the new height.
 		// However, we don't increase maximal value in unreachable code.
 		if stack.height() > max_height && !stack.frame(0)?.is_polymorphic {
 			max_height = stack.height();
 		}
-
-		let opcode = &instructions.elements()[pc];
-
 		match opcode {
+			// TODO garbage-collector proposal
+			I31New | I31GetS | I31GetU => {
+				todo!("garbage-collector proposal not supported");
+			},
+
+			// TODO memory control proposal
+			MemoryDiscard { .. } => {
+				todo!("memory control proposal not supported");
+			},
+
+			// TODO function references proposal
+			| CallRef { .. } |
+			ReturnCallRef { .. } |
+			RefAsNonNull |
+			BrOnNull { .. } |
+			BrOnNonNull { .. } => {
+				todo!("function references proposal not supported");
+			},
+
 			Nop => {},
-			Block(ty) | Loop(ty) | If(ty) => {
-				let end_arity = u32::from(*ty != BlockType::NoResult);
-				let branch_arity = if let Loop(_) = *opcode { 0 } else { end_arity };
-				if let If(_) = *opcode {
+			Block { blockty } | Loop { blockty } | If { blockty } => {
+				let end_arity = if blockty == BlockType::Empty { 0 } else { 1 };
+				let branch_arity = if let Loop { .. } = opcode { 0 } else { end_arity };
+				if let If { .. } = opcode {
 					stack.pop_values(1)?;
 				}
 				let height = stack.height();
@@ -201,18 +214,18 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 			Unreachable => {
 				stack.mark_unreachable()?;
 			},
-			Br(target) => {
+			Br { relative_depth } => {
 				// Pop values for the destination block result.
-				let target_arity = stack.frame(*target)?.branch_arity;
+				let target_arity = stack.frame(relative_depth)?.branch_arity;
 				stack.pop_values(target_arity)?;
 
 				// This instruction unconditionally transfers control to the specified block,
 				// thus all instruction until the end of the current block is deemed unreachable
 				stack.mark_unreachable()?;
 			},
-			BrIf(target) => {
+			BrIf { relative_depth } => {
 				// Pop values for the destination block result.
-				let target_arity = stack.frame(*target)?.branch_arity;
+				let target_arity = stack.frame(relative_depth)?.branch_arity;
 				stack.pop_values(target_arity)?;
 
 				// Pop condition value.
@@ -221,14 +234,14 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 				// Push values back.
 				stack.push_values(target_arity)?;
 			},
-			BrTable(br_table_data) => {
-				let arity_of_default = stack.frame(br_table_data.default)?.branch_arity;
+			BrTable { targets } => {
+				let arity_of_default = stack.frame(targets.default())?.branch_arity;
 
 				// Check that all jump targets have an equal arities.
-				for target in &*br_table_data.table {
-					let arity = stack.frame(*target)?.branch_arity;
+				for target in targets.targets() {
+					let arity = stack.frame(target?)?.branch_arity;
 					if arity != arity_of_default {
-						return Err("Arity of all jump-targets must be equal")
+						return Err(anyhow!("arity of all jump-targets must be equal"))
 					}
 				}
 
@@ -246,8 +259,11 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 				stack.pop_values(func_arity)?;
 				stack.mark_unreachable()?;
 			},
-			Call(idx) => {
-				let ty = resolve_func_type(*idx, module)?;
+			Call { function_index } => {
+				let Type::Func(ty) = module.get_type_by_func_idx(function_index)? else {
+					// TODO: Type::Array(_)
+					todo!("Array type not supported yet");
+				};
 
 				// Pop values for arguments of the function.
 				stack.pop_values(ty.params().len() as u32)?;
@@ -256,10 +272,15 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 				let callee_arity = ty.results().len() as u32;
 				stack.push_values(callee_arity)?;
 			},
-			CallIndirect(x, _) => {
-				let Type::Function(ty) =
-					type_section.types().get(*x as usize).ok_or("Type not found")?;
-
+			CallIndirect { type_index, .. } => {
+				let Type::Func(ty) = module
+					.types_map
+					.get(type_index as usize)
+					.ok_or_else(|| anyhow!("Type not found"))?
+				else {
+					// TODO: Type::Array(_) part of GC proposal
+					todo!("Array type not supported yet");
+				};
 				// Pop the offset into the function table.
 				stack.pop_values(1)?;
 
@@ -281,68 +302,68 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 				// Push the selected value.
 				stack.push_values(1)?;
 			},
-			GetLocal(_) => {
+			LocalGet { .. } => {
 				stack.push_values(1)?;
 			},
-			SetLocal(_) => {
+			LocalSet { .. } => {
 				stack.pop_values(1)?;
 			},
-			TeeLocal(_) => {
+			LocalTee { .. } => {
 				// This instruction pops and pushes the value, so
 				// effectively it doesn't modify the stack height.
 				stack.pop_values(1)?;
 				stack.push_values(1)?;
 			},
-			GetGlobal(_) => {
+			GlobalGet { .. } => {
 				stack.push_values(1)?;
 			},
-			SetGlobal(_) => {
+			GlobalSet { .. } => {
 				stack.pop_values(1)?;
 			},
-			I32Load(_, _) |
-			I64Load(_, _) |
-			F32Load(_, _) |
-			F64Load(_, _) |
-			I32Load8S(_, _) |
-			I32Load8U(_, _) |
-			I32Load16S(_, _) |
-			I32Load16U(_, _) |
-			I64Load8S(_, _) |
-			I64Load8U(_, _) |
-			I64Load16S(_, _) |
-			I64Load16U(_, _) |
-			I64Load32S(_, _) |
-			I64Load32U(_, _) => {
+			I32Load { .. } |
+			I64Load { .. } |
+			F32Load { .. } |
+			F64Load { .. } |
+			I32Load8S { .. } |
+			I32Load8U { .. } |
+			I32Load16S { .. } |
+			I32Load16U { .. } |
+			I64Load8S { .. } |
+			I64Load8U { .. } |
+			I64Load16S { .. } |
+			I64Load16U { .. } |
+			I64Load32S { .. } |
+			I64Load32U { .. } => {
 				// These instructions pop the address and pushes the result,
 				// which effictively don't modify the stack height.
 				stack.pop_values(1)?;
 				stack.push_values(1)?;
 			},
 
-			I32Store(_, _) |
-			I64Store(_, _) |
-			F32Store(_, _) |
-			F64Store(_, _) |
-			I32Store8(_, _) |
-			I32Store16(_, _) |
-			I64Store8(_, _) |
-			I64Store16(_, _) |
-			I64Store32(_, _) => {
+			I32Store { .. } |
+			I64Store { .. } |
+			F32Store { .. } |
+			F64Store { .. } |
+			I32Store8 { .. } |
+			I32Store16 { .. } |
+			I64Store8 { .. } |
+			I64Store16 { .. } |
+			I64Store32 { .. } => {
 				// These instructions pop the address and the value.
 				stack.pop_values(2)?;
 			},
 
-			CurrentMemory(_) => {
+			MemorySize { .. } => {
 				// Pushes current memory size
 				stack.push_values(1)?;
 			},
-			GrowMemory(_) => {
+			MemoryGrow { .. } => {
 				// Grow memory takes the value of pages to grow and pushes
 				stack.pop_values(1)?;
 				stack.push_values(1)?;
 			},
 
-			I32Const(_) | I64Const(_) | F32Const(_) | F64Const(_) => {
+			I32Const { .. } | I64Const { .. } | F32Const { .. } | F64Const { .. } => {
 				// These instructions just push the single literal value onto the stack.
 				stack.push_values(1)?;
 			},
@@ -382,10 +403,12 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 				stack.push_values(1)?;
 			},
 
-			I32WrapI64 | I32TruncSF32 | I32TruncUF32 | I32TruncSF64 | I32TruncUF64 |
-			I64ExtendSI32 | I64ExtendUI32 | I64TruncSF32 | I64TruncUF32 | I64TruncSF64 |
-			I64TruncUF64 | F32ConvertSI32 | F32ConvertUI32 | F32ConvertSI64 | F32ConvertUI64 |
-			F32DemoteF64 | F64ConvertSI32 | F64ConvertUI32 | F64ConvertSI64 | F64ConvertUI64 |
+			I32WrapI64 | I32TruncSatF32S | I32TruncSatF32U | I32TruncSatF64S |
+			I32TruncSatF64U | I64TruncSatF32S | I64TruncSatF32U | I64TruncSatF64S |
+			I64TruncSatF64U | I32TruncF32S | I32TruncF32U | I32TruncF64S | I32TruncF64U |
+			I64TruncF32S | I64TruncF32U | I64TruncF64S | I64TruncF64U | I64ExtendI32U |
+			I64ExtendI32S | F32ConvertI32S | F32ConvertI32U | F32ConvertI64S | F32ConvertI64U |
+			F64ConvertI32S | F64ConvertI32U | F64ConvertI64S | F64ConvertI64U | F32DemoteF64 |
 			F64PromoteF32 | I32ReinterpretF32 | I64ReinterpretF64 | F32ReinterpretI32 |
 			F64ReinterpretI64 => {
 				// Conversion operators take one value and produce one result.
@@ -393,17 +416,391 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 				stack.push_values(1)?;
 			},
 
-			#[cfg(feature = "sign_ext")]
-			SignExt(SignExtInstruction::I32Extend8S) |
-			SignExt(SignExtInstruction::I32Extend16S) |
-			SignExt(SignExtInstruction::I64Extend8S) |
-			SignExt(SignExtInstruction::I64Extend16S) |
-			SignExt(SignExtInstruction::I64Extend32S) => {
+			// sign-extension ops proposal
+			I32Extend8S | I32Extend16S | I64Extend8S | I64Extend16S | I64Extend32S => {
 				stack.pop_values(1)?;
 				stack.push_values(1)?;
 			},
+
+			// bulk memory proposal
+			MemoryInit { .. } |
+			MemoryCopy { .. } |
+			MemoryFill { .. } |
+			TableInit { .. } |
+			TableCopy { .. } => {
+				stack.pop_values(3)?;
+			},
+			ElemDrop { .. } | DataDrop { .. } => {},
+
+			// reference types proposal
+			TableFill { .. } => {
+				stack.pop_values(3)?;
+			},
+			TableGrow { .. } => {
+				stack.pop_values(2)?;
+				stack.push_values(1)?;
+			},
+			TableSize { .. } => {
+				stack.push_values(1)?;
+			},
+			TableGet { .. } => {
+				stack.pop_values(1)?;
+				stack.push_values(1)?;
+			},
+			TableSet { .. } => {
+				stack.pop_values(2)?;
+			},
+			// TODO support below instruction
+			TypedSelect { .. } | RefNull { .. } | RefIsNull { .. } | RefFunc { .. } => {
+				todo!("some reference types proposal are not supported");
+			},
+
+			// TODO exception proposal
+			Try { .. } |
+			Catch { .. } |
+			Throw { .. } |
+			Rethrow { .. } |
+			Delegate { .. } |
+			CatchAll { .. } => {
+				todo!("exception instructions are not supported");
+			},
+
+			// TODO SIMD instructions
+			V128Load { .. } |
+			V128Load8x8S { .. } |
+			V128Load8x8U { .. } |
+			V128Load16x4S { .. } |
+			V128Load16x4U { .. } |
+			V128Load32x2S { .. } |
+			V128Load32x2U { .. } |
+			V128Load8Splat { .. } |
+			V128Load16Splat { .. } |
+			V128Load32Splat { .. } |
+			V128Load64Splat { .. } |
+			V128Load32Zero { .. } |
+			V128Load64Zero { .. } |
+			V128Store { .. } |
+			V128Load8Lane { .. } |
+			V128Load16Lane { .. } |
+			V128Load32Lane { .. } |
+			V128Load64Lane { .. } |
+			V128Store8Lane { .. } |
+			V128Store16Lane { .. } |
+			V128Store32Lane { .. } |
+			V128Store64Lane { .. } |
+			V128Const { .. } |
+			I8x16Shuffle { .. } |
+			I8x16ExtractLaneS { .. } |
+			I8x16ExtractLaneU { .. } |
+			I8x16ReplaceLane { .. } |
+			I16x8ExtractLaneS { .. } |
+			I16x8ExtractLaneU { .. } |
+			I16x8ReplaceLane { .. } |
+			I32x4ExtractLane { .. } |
+			I32x4ReplaceLane { .. } |
+			I64x2ExtractLane { .. } |
+			I64x2ReplaceLane { .. } |
+			F32x4ExtractLane { .. } |
+			F32x4ReplaceLane { .. } |
+			F64x2ExtractLane { .. } |
+			F64x2ReplaceLane { .. } |
+			I8x16Swizzle { .. } |
+			I8x16Splat { .. } |
+			I16x8Splat { .. } |
+			I32x4Splat { .. } |
+			I64x2Splat { .. } |
+			F32x4Splat { .. } |
+			F64x2Splat { .. } |
+			I8x16Eq { .. } |
+			I8x16Ne { .. } |
+			I8x16LtS { .. } |
+			I8x16LtU { .. } |
+			I8x16GtS { .. } |
+			I8x16GtU { .. } |
+			I8x16LeS { .. } |
+			I8x16LeU { .. } |
+			I8x16GeS { .. } |
+			I8x16GeU { .. } |
+			I16x8Eq { .. } |
+			I16x8Ne { .. } |
+			I16x8LtS { .. } |
+			I16x8LtU { .. } |
+			I16x8GtS { .. } |
+			I16x8GtU { .. } |
+			I16x8LeS { .. } |
+			I16x8LeU { .. } |
+			I16x8GeS { .. } |
+			I16x8GeU { .. } |
+			I32x4Eq { .. } |
+			I32x4Ne { .. } |
+			I32x4LtS { .. } |
+			I32x4LtU { .. } |
+			I32x4GtS { .. } |
+			I32x4GtU { .. } |
+			I32x4LeS { .. } |
+			I32x4LeU { .. } |
+			I32x4GeS { .. } |
+			I32x4GeU { .. } |
+			I64x2Eq { .. } |
+			I64x2Ne { .. } |
+			I64x2LtS { .. } |
+			I64x2GtS { .. } |
+			I64x2LeS { .. } |
+			I64x2GeS { .. } |
+			F32x4Eq { .. } |
+			F32x4Ne { .. } |
+			F32x4Lt { .. } |
+			F32x4Gt { .. } |
+			F32x4Le { .. } |
+			F32x4Ge { .. } |
+			F64x2Eq { .. } |
+			F64x2Ne { .. } |
+			F64x2Lt { .. } |
+			F64x2Gt { .. } |
+			F64x2Le { .. } |
+			F64x2Ge { .. } |
+			V128Not { .. } |
+			V128And { .. } |
+			V128AndNot { .. } |
+			V128Or { .. } |
+			V128Xor { .. } |
+			V128Bitselect { .. } |
+			V128AnyTrue { .. } |
+			I8x16Abs { .. } |
+			I8x16Neg { .. } |
+			I8x16Popcnt { .. } |
+			I8x16AllTrue { .. } |
+			I8x16Bitmask { .. } |
+			I8x16NarrowI16x8S { .. } |
+			I8x16NarrowI16x8U { .. } |
+			I8x16Shl { .. } |
+			I8x16ShrS { .. } |
+			I8x16ShrU { .. } |
+			I8x16Add { .. } |
+			I8x16AddSatS { .. } |
+			I8x16AddSatU { .. } |
+			I8x16Sub { .. } |
+			I8x16SubSatS { .. } |
+			I8x16SubSatU { .. } |
+			I8x16MinS { .. } |
+			I8x16MinU { .. } |
+			I8x16MaxS { .. } |
+			I8x16MaxU { .. } |
+			I8x16AvgrU |
+			I16x8ExtAddPairwiseI8x16S { .. } |
+			I16x8ExtAddPairwiseI8x16U { .. } |
+			I16x8Abs { .. } |
+			I16x8Neg { .. } |
+			I16x8Q15MulrSatS { .. } |
+			I16x8AllTrue { .. } |
+			I16x8Bitmask { .. } |
+			I16x8NarrowI32x4S { .. } |
+			I16x8NarrowI32x4U { .. } |
+			I16x8ExtendLowI8x16S { .. } |
+			I16x8ExtendHighI8x16S { .. } |
+			I16x8ExtendLowI8x16U { .. } |
+			I16x8ExtendHighI8x16U { .. } |
+			I16x8Shl { .. } |
+			I16x8ShrS { .. } |
+			I16x8ShrU { .. } |
+			I16x8Add { .. } |
+			I16x8AddSatS { .. } |
+			I16x8AddSatU { .. } |
+			I16x8Sub { .. } |
+			I16x8SubSatS { .. } |
+			I16x8SubSatU { .. } |
+			I16x8Mul { .. } |
+			I16x8MinS { .. } |
+			I16x8MinU { .. } |
+			I16x8MaxS { .. } |
+			I16x8MaxU { .. } |
+			I16x8AvgrU |
+			I16x8ExtMulLowI8x16S { .. } |
+			I16x8ExtMulHighI8x16S { .. } |
+			I16x8ExtMulLowI8x16U { .. } |
+			I16x8ExtMulHighI8x16U { .. } |
+			I32x4ExtAddPairwiseI16x8S { .. } |
+			I32x4ExtAddPairwiseI16x8U { .. } |
+			I32x4Abs { .. } |
+			I32x4Neg { .. } |
+			I32x4AllTrue { .. } |
+			I32x4Bitmask { .. } |
+			I32x4ExtendLowI16x8S { .. } |
+			I32x4ExtendHighI16x8S { .. } |
+			I32x4ExtendLowI16x8U { .. } |
+			I32x4ExtendHighI16x8U { .. } |
+			I32x4Shl { .. } |
+			I32x4ShrS { .. } |
+			I32x4ShrU { .. } |
+			I32x4Add { .. } |
+			I32x4Sub { .. } |
+			I32x4Mul { .. } |
+			I32x4MinS { .. } |
+			I32x4MinU { .. } |
+			I32x4MaxS { .. } |
+			I32x4MaxU { .. } |
+			I32x4DotI16x8S { .. } |
+			I32x4ExtMulLowI16x8S { .. } |
+			I32x4ExtMulHighI16x8S { .. } |
+			I32x4ExtMulLowI16x8U { .. } |
+			I32x4ExtMulHighI16x8U { .. } |
+			I64x2Abs { .. } |
+			I64x2Neg { .. } |
+			I64x2AllTrue { .. } |
+			I64x2Bitmask { .. } |
+			I64x2ExtendLowI32x4S { .. } |
+			I64x2ExtendHighI32x4S { .. } |
+			I64x2ExtendLowI32x4U { .. } |
+			I64x2ExtendHighI32x4U { .. } |
+			I64x2Shl { .. } |
+			I64x2ShrS { .. } |
+			I64x2ShrU { .. } |
+			I64x2Add { .. } |
+			I64x2Sub { .. } |
+			I64x2Mul { .. } |
+			I64x2ExtMulLowI32x4S { .. } |
+			I64x2ExtMulHighI32x4S { .. } |
+			I64x2ExtMulLowI32x4U { .. } |
+			I64x2ExtMulHighI32x4U { .. } |
+			F32x4Ceil { .. } |
+			F32x4Floor { .. } |
+			F32x4Trunc { .. } |
+			F32x4Nearest { .. } |
+			F32x4Abs { .. } |
+			F32x4Neg { .. } |
+			F32x4Sqrt { .. } |
+			F32x4Add { .. } |
+			F32x4Sub { .. } |
+			F32x4Mul { .. } |
+			F32x4Div { .. } |
+			F32x4Min { .. } |
+			F32x4Max { .. } |
+			F32x4PMin { .. } |
+			F32x4PMax { .. } |
+			F64x2Ceil { .. } |
+			F64x2Floor { .. } |
+			F64x2Trunc { .. } |
+			F64x2Nearest { .. } |
+			F64x2Abs { .. } |
+			F64x2Neg { .. } |
+			F64x2Sqrt { .. } |
+			F64x2Add { .. } |
+			F64x2Sub { .. } |
+			F64x2Mul { .. } |
+			F64x2Div { .. } |
+			F64x2Min { .. } |
+			F64x2Max { .. } |
+			F64x2PMin { .. } |
+			F64x2PMax { .. } |
+			I32x4TruncSatF32x4S { .. } |
+			I32x4TruncSatF32x4U { .. } |
+			F32x4ConvertI32x4S { .. } |
+			F32x4ConvertI32x4U { .. } |
+			I32x4TruncSatF64x2SZero { .. } |
+			I32x4TruncSatF64x2UZero { .. } |
+			F64x2ConvertLowI32x4S { .. } |
+			F64x2ConvertLowI32x4U { .. } |
+			F32x4DemoteF64x2Zero { .. } |
+			F64x2PromoteLowF32x4 { .. } |
+			I8x16RelaxedSwizzle { .. } |
+			I32x4RelaxedTruncF32x4S { .. } |
+			I32x4RelaxedTruncF32x4U { .. } |
+			I32x4RelaxedTruncF64x2SZero { .. } |
+			I32x4RelaxedTruncF64x2UZero { .. } |
+			F32x4RelaxedMadd { .. } |
+			F32x4RelaxedNmadd { .. } |
+			F64x2RelaxedMadd { .. } |
+			F64x2RelaxedNmadd { .. } |
+			I8x16RelaxedLaneselect { .. } |
+			I16x8RelaxedLaneselect { .. } |
+			I32x4RelaxedLaneselect { .. } |
+			I64x2RelaxedLaneselect { .. } |
+			F32x4RelaxedMin { .. } |
+			F32x4RelaxedMax { .. } |
+			F64x2RelaxedMin { .. } |
+			F64x2RelaxedMax { .. } |
+			I16x8RelaxedQ15mulrS { .. } |
+			I16x8RelaxedDotI8x16I7x16S { .. } |
+			I32x4RelaxedDotI8x16I7x16AddS { .. } => {
+				todo!("simd instructions are not supported");
+			},
+
+			// TODO thread proposal
+			MemoryAtomicNotify { .. } |
+			MemoryAtomicWait32 { .. } |
+			MemoryAtomicWait64 { .. } |
+			I32AtomicLoad { .. } |
+			I64AtomicLoad { .. } |
+			I32AtomicLoad8U { .. } |
+			I32AtomicLoad16U { .. } |
+			I64AtomicLoad8U { .. } |
+			I64AtomicLoad16U { .. } |
+			I64AtomicLoad32U { .. } |
+			I32AtomicStore { .. } |
+			I64AtomicStore { .. } |
+			I32AtomicStore8 { .. } |
+			I32AtomicStore16 { .. } |
+			I64AtomicStore8 { .. } |
+			I64AtomicStore16 { .. } |
+			I64AtomicStore32 { .. } |
+			I32AtomicRmwAdd { .. } |
+			I64AtomicRmwAdd { .. } |
+			I32AtomicRmw8AddU { .. } |
+			I32AtomicRmw16AddU { .. } |
+			I64AtomicRmw8AddU { .. } |
+			I64AtomicRmw16AddU { .. } |
+			I64AtomicRmw32AddU { .. } |
+			I32AtomicRmwSub { .. } |
+			I64AtomicRmwSub { .. } |
+			I32AtomicRmw8SubU { .. } |
+			I32AtomicRmw16SubU { .. } |
+			I64AtomicRmw8SubU { .. } |
+			I64AtomicRmw16SubU { .. } |
+			I64AtomicRmw32SubU { .. } |
+			I32AtomicRmwAnd { .. } |
+			I64AtomicRmwAnd { .. } |
+			I32AtomicRmw8AndU { .. } |
+			I32AtomicRmw16AndU { .. } |
+			I64AtomicRmw8AndU { .. } |
+			I64AtomicRmw16AndU { .. } |
+			I64AtomicRmw32AndU { .. } |
+			I32AtomicRmwOr { .. } |
+			I64AtomicRmwOr { .. } |
+			I32AtomicRmw8OrU { .. } |
+			I32AtomicRmw16OrU { .. } |
+			I64AtomicRmw8OrU { .. } |
+			I64AtomicRmw16OrU { .. } |
+			I64AtomicRmw32OrU { .. } |
+			I32AtomicRmwXor { .. } |
+			I64AtomicRmwXor { .. } |
+			I32AtomicRmw8XorU { .. } |
+			I32AtomicRmw16XorU { .. } |
+			I64AtomicRmw8XorU { .. } |
+			I64AtomicRmw16XorU { .. } |
+			I64AtomicRmw32XorU { .. } |
+			I32AtomicRmwXchg { .. } |
+			I64AtomicRmwXchg { .. } |
+			I32AtomicRmw8XchgU { .. } |
+			I32AtomicRmw16XchgU { .. } |
+			I64AtomicRmw8XchgU { .. } |
+			I64AtomicRmw16XchgU { .. } |
+			I64AtomicRmw32XchgU { .. } |
+			I32AtomicRmwCmpxchg { .. } |
+			I64AtomicRmwCmpxchg { .. } |
+			I32AtomicRmw8CmpxchgU { .. } |
+			I32AtomicRmw16CmpxchgU { .. } |
+			I64AtomicRmw8CmpxchgU { .. } |
+			I64AtomicRmw16CmpxchgU { .. } |
+			AtomicFence { .. } |
+			I64AtomicRmw32CmpxchgU { .. } => {
+				todo!("thread proposal instructions are not supported");
+			},
+
+			// TODO Tail-call proposal
+			ReturnCall { .. } | ReturnCallIndirect { .. } => {
+				todo!("tail-call instructions are not supported");
+			},
 		}
-		pc += 1;
 	}
 
 	Ok(max_height)
@@ -412,11 +809,10 @@ pub fn compute(func_idx: u32, module: &elements::Module) -> Result<u32, &'static
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use parity_wasm::elements;
 
-	fn parse_wat(source: &str) -> elements::Module {
-		elements::deserialize_buffer(&wat::parse_str(source).expect("Failed to wat2wasm"))
-			.expect("Failed to deserialize the module")
+	fn parse_wat(source: &str) -> ModuleInfo {
+		let module_bytes = wat::parse_str(source).unwrap();
+		ModuleInfo::new(&module_bytes).unwrap()
 	}
 
 	#[test]

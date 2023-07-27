@@ -8,7 +8,7 @@ use std::{
 };
 use wasm_instrument::{
 	gas_metering::{self, host_function, mutable_global, ConstantCostRules},
-	parity_wasm::{deserialize_buffer, elements::Module, serialize},
+	utils::module_info::ModuleInfo,
 };
 use wasmi::{
 	core::{Pages, TrapCode, F32},
@@ -26,9 +26,7 @@ trait MeteringStrategy {
 	}
 
 	/// The strategy may or may not want to instrument the module.
-	fn instrument_module(module: Module) -> Module {
-		module
-	}
+	fn instrument_module(_module: &mut ModuleInfo) {}
 
 	/// The strategy might need to define additional host functions.
 	fn define_host_funcs(_linker: &mut Linker<u64>) {}
@@ -64,9 +62,9 @@ impl MeteringStrategy for WasmiMetering {
 }
 
 impl MeteringStrategy for HostFunctionMetering {
-	fn instrument_module(module: Module) -> Module {
+	fn instrument_module(module: &mut ModuleInfo) {
 		let backend = host_function::Injector::new("env", "gas");
-		gas_metering::inject(module, backend, &ConstantCostRules::default()).unwrap()
+		gas_metering::inject(module, backend, &ConstantCostRules::default()).unwrap();
 	}
 
 	fn define_host_funcs(linker: &mut Linker<u64>) {
@@ -83,9 +81,9 @@ impl MeteringStrategy for HostFunctionMetering {
 }
 
 impl MeteringStrategy for MutableGlobalMetering {
-	fn instrument_module(module: Module) -> Module {
-		let backend = mutable_global::Injector::new("gas_left");
-		gas_metering::inject(module, backend, &ConstantCostRules::default()).unwrap()
+	fn instrument_module(module: &mut ModuleInfo) {
+		let backend = mutable_global::Injector::new("env", "gas_left");
+		gas_metering::inject(module, backend, &ConstantCostRules::default()).unwrap();
 	}
 
 	fn init_instance(module: &mut BenchInstance) {
@@ -116,9 +114,9 @@ impl BenchInstance {
 		S: MeteringStrategy,
 		H: Fn(&mut Linker<u64>),
 	{
-		let module = deserialize_buffer(wasm).unwrap();
-		let instrumented_module = S::instrument_module(module);
-		let input = serialize(instrumented_module).unwrap();
+		let mut module = ModuleInfo::new(wasm).unwrap();
+		S::instrument_module(&mut module);
+		let input = module.bytes();
 		let mut config = S::config();
 		config.set_stack_limits(StackLimits::new(1024, 1024 * 1024, 64 * 1024).unwrap());
 		let engine = Engine::new(&config);

@@ -5,7 +5,7 @@ use std::{
 use wasm_instrument::{
 	gas_metering::{self, host_function, mutable_global, ConstantCostRules},
 	inject_stack_limiter,
-	parity_wasm::{deserialize_buffer, elements::Module, serialize},
+	utils::module_info::ModuleInfo,
 };
 
 fn fixture_dir() -> PathBuf {
@@ -16,18 +16,19 @@ fn fixture_dir() -> PathBuf {
 }
 
 use gas_metering::Backend;
-fn gas_metered_mod_len<B: Backend>(orig_module: Module, backend: B) -> (Module, usize) {
-	let module = gas_metering::inject(orig_module, backend, &ConstantCostRules::default()).unwrap();
-	let bytes = serialize(module.clone()).unwrap();
-	let len = bytes.len();
-	(module, len)
+fn gas_metered_mod_len<B: Backend>(input_wasm: &[u8], backend: B) -> (Vec<u8>, usize) {
+	let mut module = ModuleInfo::new(input_wasm).expect("Failed to parse WASM input");
+	let wasm_bytes =
+		gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+	let len = wasm_bytes.len();
+	(wasm_bytes, len)
 }
 
-fn stack_limited_mod_len(module: Module) -> (Module, usize) {
-	let module = inject_stack_limiter(module, 128).unwrap();
-	let bytes = serialize(module.clone()).unwrap();
-	let len = bytes.len();
-	(module, len)
+fn stack_limited_mod_len(input_wasm: &[u8]) -> (Vec<u8>, usize) {
+	let mut module = ModuleInfo::new(input_wasm).expect("Failed to parse WASM input");
+	let wasm_bytes = inject_stack_limiter(&mut module, 128).unwrap();
+	let len = wasm_bytes.len();
+	(wasm_bytes, len)
 }
 
 struct InstrumentedWasmResults {
@@ -46,7 +47,7 @@ fn size_overheads_all(files: ReadDir) -> Vec<InstrumentedWasmResults> {
 			let entry = entry.unwrap();
 			let filename = entry.file_name().into_string().unwrap();
 
-			let (original_module_len, orig_module) = {
+			let (original_module_len, orig_wasm) = {
 				let bytes = match entry.path().extension().unwrap().to_str() {
 					Some("wasm") => read(entry.path()).unwrap(),
 					Some("wat") =>
@@ -55,25 +56,22 @@ fn size_overheads_all(files: ReadDir) -> Vec<InstrumentedWasmResults> {
 				};
 
 				let len = bytes.len();
-				let module: Module = deserialize_buffer(&bytes).unwrap();
-				(len, module)
+				(len, bytes)
 			};
 
-			let (gm_host_fn_module, gas_metered_host_fn_len) = gas_metered_mod_len(
-				orig_module.clone(),
-				host_function::Injector::new("env", "gas"),
-			);
+			let (gm_host_fn_wasm, gas_metered_host_fn_len) =
+				gas_metered_mod_len(&orig_wasm, host_function::Injector::new("env", "gas"));
 
-			let (gm_mut_global_module, gas_metered_mut_glob_len) =
-				gas_metered_mod_len(orig_module.clone(), mutable_global::Injector::new("gas_left"));
+			let (gm_mut_global_wasm, gas_metered_mut_glob_len) =
+				gas_metered_mod_len(&orig_wasm, mutable_global::Injector::new("env", "gas_left"));
 
-			let stack_limited_len = stack_limited_mod_len(orig_module).1;
+			let stack_limited_len = stack_limited_mod_len(&orig_wasm).1;
 
 			let (_gm_hf_sl_mod, gas_metered_host_fn_then_stack_limited_len) =
-				stack_limited_mod_len(gm_host_fn_module);
+				stack_limited_mod_len(&gm_host_fn_wasm);
 
 			let (_gm_mg_sl_module, gas_metered_mut_glob_then_stack_limited_len) =
-				stack_limited_mod_len(gm_mut_global_module);
+				stack_limited_mod_len(&gm_mut_global_wasm);
 
 			InstrumentedWasmResults {
 				filename,

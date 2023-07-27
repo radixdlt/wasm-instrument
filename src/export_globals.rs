@@ -1,79 +1,41 @@
-use alloc::{format, vec::Vec};
-use parity_wasm::elements;
+use crate::utils::module_info::ModuleInfo;
+use alloc::{format, vec, vec::Vec};
+use anyhow::Result;
+use wasm_encoder::ExportKind;
 
 /// Export all declared mutable globals as `prefix_index`.
 ///
 /// This will export all internal mutable globals under the name of
 /// concat(`prefix`, `"_"`, `i`) where i is the index inside the range of
 /// [0..total number of internal mutable globals].
-pub fn export_mutable_globals(module: &mut elements::Module, prefix: &str) {
-	let exports = global_section(module)
-		.map(|section| {
-			section
-				.entries()
-				.iter()
-				.enumerate()
-				.filter_map(
-					|(index, global)| {
-						if global.global_type().is_mutable() {
-							Some(index)
-						} else {
-							None
-						}
-					},
-				)
-				.collect::<Vec<_>>()
-		})
-		.unwrap_or_default();
+pub fn export_mutable_globals(module_info: &mut ModuleInfo, prefix: &str) -> Result<()> {
+	let mutable_globals_to_export = module_info
+		.global_section()?
+		.unwrap_or(vec![])
+		.iter()
+		.enumerate()
+		.filter_map(|(index, global)| if global.ty.mutable { Some(index as u32) } else { None })
+		.collect::<Vec<u32>>();
 
-	if module.export_section().is_none() {
-		module
-			.sections_mut()
-			.push(elements::Section::Export(elements::ExportSection::default()));
+	let mut exports = vec![];
+	// Add mutable globals to the export section
+	for (symbol_index, export) in mutable_globals_to_export.into_iter().enumerate() {
+		let name = format!("{}_{}", prefix, symbol_index);
+		exports.push((name, ExportKind::Global, module_info.imported_globals_count + export))
 	}
+	module_info.add_exports(&exports)?;
 
-	for (symbol_index, export) in exports.into_iter().enumerate() {
-		let new_entry = elements::ExportEntry::new(
-			format!("{}_{}", prefix, symbol_index),
-			elements::Internal::Global(
-				(module.import_count(elements::ImportCountType::Global) + export) as _,
-			),
-		);
-		export_section(module)
-			.expect("added above if does not exists")
-			.entries_mut()
-			.push(new_entry);
-	}
-}
-
-fn export_section(module: &mut elements::Module) -> Option<&mut elements::ExportSection> {
-	for section in module.sections_mut() {
-		if let elements::Section::Export(sect) = section {
-			return Some(sect)
-		}
-	}
-	None
-}
-
-fn global_section(module: &mut elements::Module) -> Option<&mut elements::GlobalSection> {
-	for section in module.sections_mut() {
-		if let elements::Section::Global(sect) = section {
-			return Some(sect)
-		}
-	}
-	None
+	Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-
 	use super::export_mutable_globals;
-	use parity_wasm::elements;
+	use crate::utils::module_info::ModuleInfo;
 
-	fn parse_wat(source: &str) -> elements::Module {
+	fn parse_wat(source: &str) -> ModuleInfo {
 		let module_bytes = wat::parse_str(source).unwrap();
-		wasmparser::validate(&module_bytes).unwrap();
-		elements::deserialize_buffer(module_bytes.as_ref()).expect("failed to parse module")
+		ModuleInfo::new(&module_bytes).expect("failed to parse module")
 	}
 
 	macro_rules! test_export_global {
@@ -83,18 +45,16 @@ mod tests {
 				let mut input_module = parse_wat($input);
 				let expected_module = parse_wat($expected);
 
-				export_mutable_globals(&mut input_module, "exported_internal_global");
+				export_mutable_globals(&mut input_module, "exported_internal_global").unwrap();
 
-				let actual_bytes = elements::serialize(input_module)
-					.expect("injected module must have a function body");
-
-				let expected_bytes = elements::serialize(expected_module)
-					.expect("injected module must have a function body");
+				let actual_bytes = input_module.bytes();
+				let expected_bytes = expected_module.bytes();
 
 				let actual_wat = wasmprinter::print_bytes(actual_bytes).unwrap();
 				let expected_wat = wasmprinter::print_bytes(expected_bytes).unwrap();
 
 				if actual_wat != expected_wat {
+					#[cfg(features = "std")]
 					for diff in diff::lines(&expected_wat, &actual_wat) {
 						match diff {
 							diff::Result::Left(l) => println!("-{}", l),
@@ -156,6 +116,18 @@ mod tests {
 			(global (;0;) i32 (i32.const 1))
 			(global (;1;) (mut i32) (i32.const 0))
 			(export "exported_internal_global_0" (global 2)))
+		"#
+	}
+
+	test_export_global! {
+		name = no_global;
+		input = r#"
+		(module
+			(import "env" "global" (global $global i64)))
+		"#;
+		expected = r#"
+		(module
+			(import "env" "global" (global $global i64)))
 		"#
 	}
 }
