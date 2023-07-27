@@ -301,9 +301,10 @@ impl ModuleInfo {
 	}
 
 	pub fn resolve_type_idx(&self, t: &Type) -> Option<u32> {
-		let Type::Func(dt) = t else { todo!() };
+		// TODO: Type::Array(_) part of GC proposal
+		let Type::Func(dt) = t else { todo!("Array type not supported yet") };
 		for (index, ty) in self.types_map.iter().enumerate() {
-			let Type::Func(ot) = ty else { todo!() };
+			let Type::Func(ot) = ty else { todo!("Array type not supported yet") };
 			if ot.eq(dt) {
 				return Some(index as u32)
 			}

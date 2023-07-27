@@ -67,8 +67,8 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 					Thunk {
 						signature: match module_info.get_type_by_func_idx(func_idx)?.clone() {
 							Type::Func(ft) => ft,
-							// TODO: proper handling of Array
-							Type::Array(_) => todo!(),
+							// TODO: Type::Array(_) part of GC proposal
+							Type::Array(_) => todo!("Array type not supported yet"),
 						},
 						idx: None,
 						callee_stack_cost,
