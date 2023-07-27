@@ -366,6 +366,7 @@ impl ModuleInfo {
 					self.exports_global_count += 1;
 				}
 				self.export_names.insert(String::from(name));
+				self.exports_count += 1;
 			} else {
 				return Err(ModuleInfoError::ExportAlreadyExists(String::from(name)))
 			}
