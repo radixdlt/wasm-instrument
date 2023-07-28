@@ -262,6 +262,32 @@ impl ModuleInfo {
 		Ok(info)
 	}
 
+	#[cfg(test)]
+	pub fn assert_stats(&self) {
+		// Global section
+		assert_eq!(
+			self.global_section().unwrap().unwrap_or(vec![]).len(),
+			self.num_local_globals() as usize
+		);
+		// Imported globals
+		assert_eq!(
+			self.global_types.len() - self.num_local_globals() as usize,
+			self.num_imported_globals() as usize
+		);
+
+		// Export section
+		assert_eq!(self.export_names.len(), self.exports_count as usize);
+		assert_eq!(
+			self.export_section().unwrap().unwrap_or(vec![]).len(),
+			self.exports_count as usize
+		);
+		// Element section
+		assert_eq!(
+			self.element_section().unwrap().unwrap_or(vec![]).len(),
+			self.elements_count as usize,
+		);
+	}
+
 	/// Validates the WASM binary
 	pub fn validate(&self, features: WasmFeatures) -> Result<()> {
 		if self.code_section_entry_count != self.num_local_functions() {
@@ -341,13 +367,6 @@ impl ModuleInfo {
 		DefaultTranslator.translate_type_def(func_type.clone(), &mut type_builder)?;
 		self.replace_section(SectionId::Type.into(), &type_builder)?;
 		Ok(func_type_index)
-	}
-
-	/// Returns the number of globals used by the Wasm binary including imported
-	/// globals
-	#[allow(dead_code)]
-	pub fn get_global_count(&self) -> usize {
-		self.global_types.len()
 	}
 
 	/// Replace the `i`th section in this module with the given new section.
@@ -485,6 +504,7 @@ impl ModuleInfo {
 			global_name,
 			DefaultTranslator.translate_global_type(&global_type)?,
 		);
+		self.global_types.push(global_type);
 		self.imported_globals_count += 1;
 		self.replace_section(SectionId::Import.into(), &import_decoder)
 	}
@@ -574,6 +594,7 @@ impl ModuleInfo {
 		self.imported_memories_count
 	}
 
+	/// Returns the number of globals: local and imported
 	#[allow(dead_code)]
 	pub fn num_globals(&self) -> u32 {
 		self.global_types.len() as u32
@@ -652,6 +673,8 @@ pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Res
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use wasm_encoder::ExportKind;
+	use wasmparser::{FuncType, ValType};
 
 	fn wasm_to_wat(bytes: &[u8]) -> String {
 		String::from_utf8(
@@ -719,5 +742,51 @@ mod tests {
 		let wat = wasm_to_wat(&bytes);
 
 		assert_eq!(expected_wat, wat)
+	}
+
+	#[test]
+	fn test_module_info_stats() {
+		let bytes = wat_to_wasm(WAT);
+		let mut module = ModuleInfo::new(&bytes).unwrap();
+
+		module.assert_stats();
+
+		module
+			.add_global(
+				GlobalType { content_type: ValType::I64, mutable: true },
+				&wasm_encoder::ConstExpr::i64_const(0),
+			)
+			.unwrap();
+
+		module
+			.add_import_global(
+				"env",
+				"some_global",
+				GlobalType { content_type: ValType::I64, mutable: true },
+			)
+			.unwrap();
+
+		let func_type = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
+		module.add_func_type(&func_type).unwrap();
+
+		// Add import of function of type that already exists
+		module.add_import_func("env", "some_func", func_type).unwrap();
+
+		let func_type =
+			Type::Func(FuncType::new(vec![ValType::I64, ValType::I64], vec![ValType::I32]));
+
+		// Add import with function type that does not exist yet
+		module.add_import_func("env", "some_func_2", func_type).unwrap();
+
+		module
+			.add_exports(&[
+				("export_global".to_string(), ExportKind::Global, 0),
+				("export_func".to_string(), ExportKind::Func, 0),
+				("export_memory".to_string(), ExportKind::Memory, 0),
+				("export_table".to_string(), ExportKind::Table, 0),
+			])
+			.unwrap();
+
+		module.assert_stats();
 	}
 }
