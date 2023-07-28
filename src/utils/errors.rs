@@ -6,6 +6,7 @@ use wasmparser::BinaryReaderError;
 #[derive(Clone, Debug)]
 pub enum ModuleInfoError {
 	WasmParserError(BinaryReaderError),
+	SectionNotSupported(String),
 	TranslatorError(TranslatorError),
 	TypeDoesNotExist(u32),
 	FunctionDoesNotExist(u32),

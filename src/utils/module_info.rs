@@ -4,6 +4,7 @@ use crate::utils::{
 };
 use alloc::{
 	collections::{BTreeMap, BTreeSet},
+	format,
 	string::String,
 	vec,
 	vec::Vec,
@@ -251,7 +252,7 @@ impl ModuleInfo {
 				},
 				Payload::Version { .. } => {},
 				Payload::End(_) => break,
-				_ => todo!("{:?} not implemented", payload),
+				p => return Err(ModuleInfoError::SectionNotSupported(format!("{:?}", p))),
 			}
 			wasm = &wasm[consumed..];
 		}
