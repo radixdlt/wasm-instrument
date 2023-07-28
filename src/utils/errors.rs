@@ -1,5 +1,6 @@
 use alloc::string::String;
 use anyhow::{anyhow, Error};
+use core::ops::Range;
 use wasmparser::BinaryReaderError;
 
 // ModuleInfo errors
@@ -8,6 +9,7 @@ pub enum ModuleInfoError {
 	WasmParserError(BinaryReaderError),
 	SectionNotSupported(String),
 	TranslatorError(TranslatorError),
+	SectionRangeExceedsWasmLength { range: Range<usize>, wasm_len: usize },
 	TypeDoesNotExist(u32),
 	FunctionDoesNotExist(u32),
 	NoMemorySection,

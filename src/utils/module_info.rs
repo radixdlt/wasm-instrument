@@ -134,7 +134,7 @@ impl ModuleInfo {
 			match payload {
 				Payload::CodeSectionStart { count, range, size: _ } => {
 					info.code_section_entry_count = count;
-					info.section(SectionId::Code.into(), range.clone(), input_wasm);
+					info.section(SectionId::Code.into(), range.clone(), input_wasm)?;
 					parser.skip_section();
 					// update slice, bypass the section
 					wasm = &input_wasm[range.end..];
@@ -142,7 +142,7 @@ impl ModuleInfo {
 					continue
 				},
 				Payload::TypeSection(reader) => {
-					info.section(SectionId::Type.into(), reader.range(), input_wasm);
+					info.section(SectionId::Type.into(), reader.range(), input_wasm)?;
 
 					// Save function types
 					for ty in reader.into_iter() {
@@ -150,7 +150,7 @@ impl ModuleInfo {
 					}
 				},
 				Payload::ImportSection(reader) => {
-					info.section(SectionId::Import.into(), reader.range(), input_wasm);
+					info.section(SectionId::Import.into(), reader.range(), input_wasm)?;
 
 					for import in reader.into_iter() {
 						let import = import?;
@@ -182,7 +182,7 @@ impl ModuleInfo {
 					}
 				},
 				Payload::FunctionSection(reader) => {
-					info.section(SectionId::Function.into(), reader.range(), input_wasm);
+					info.section(SectionId::Function.into(), reader.range(), input_wasm)?;
 
 					for func_idx in reader.into_iter() {
 						info.function_map.push(func_idx?);
@@ -190,7 +190,7 @@ impl ModuleInfo {
 				},
 				Payload::TableSection(reader) => {
 					info.table_count += reader.count();
-					info.section(SectionId::Table.into(), reader.range(), input_wasm);
+					info.section(SectionId::Table.into(), reader.range(), input_wasm)?;
 
 					for table in reader.into_iter() {
 						let table = table?;
@@ -198,15 +198,15 @@ impl ModuleInfo {
 					}
 				},
 				Payload::MemorySection(reader) => {
-					info.memory_count += reader.count();
-					info.section(SectionId::Memory.into(), reader.range(), input_wasm);
+					info.memory_count = reader.count();
+					info.section(SectionId::Memory.into(), reader.range(), input_wasm)?;
 
 					for ty in reader.into_iter() {
 						info.memory_types.push(ty?);
 					}
 				},
 				Payload::GlobalSection(reader) => {
-					info.section(SectionId::Global.into(), reader.range(), input_wasm);
+					info.section(SectionId::Global.into(), reader.range(), input_wasm)?;
 
 					for global in reader.into_iter() {
 						let global = global?;
@@ -214,41 +214,43 @@ impl ModuleInfo {
 					}
 				},
 				Payload::ExportSection(reader) => {
-					info.exports_count = reader.count();
-
 					for export in reader.clone().into_iter() {
 						let export = export?;
-						if let ExternalKind::Global = export.kind {
-							info.exports_global_count += 1;
+						if !info.export_names.contains(export.name) {
+							if let ExternalKind::Global = export.kind {
+								info.exports_global_count += 1;
+							}
+							info.export_names.insert(export.name.into());
+							info.exports_count += 1;
+						} else {
+							return Err(ModuleInfoError::ExportAlreadyExists(export.name.into()))
 						}
-						info.export_names.insert(export.name.into());
 					}
-
-					info.section(SectionId::Export.into(), reader.range(), input_wasm);
+					info.section(SectionId::Export.into(), reader.range(), input_wasm)?;
 				},
 				Payload::StartSection { func, range } => {
 					info.start_function = Some(func);
-					info.section(SectionId::Start.into(), range, input_wasm);
+					info.section(SectionId::Start.into(), range, input_wasm)?;
 				},
 				Payload::ElementSection(reader) => {
 					info.elements_count = reader.count();
-					info.section(SectionId::Element.into(), reader.range(), input_wasm);
+					info.section(SectionId::Element.into(), reader.range(), input_wasm)?;
 				},
 				Payload::DataSection(reader) => {
 					info.data_segments_count = reader.count();
-					info.section(SectionId::Data.into(), reader.range(), input_wasm);
+					info.section(SectionId::Data.into(), reader.range(), input_wasm)?;
 				},
 				#[allow(unused_variables)]
 				Payload::CustomSection(c) => {
 					#[cfg(not(feature = "ignore_custom_section"))]
 					// At the moment only name section supported
 					if c.name() == "name" {
-						info.section(SectionId::Custom.into(), c.range(), input_wasm);
+						info.section(SectionId::Custom.into(), c.range(), input_wasm)?;
 					}
 				},
 
 				Payload::DataCountSection { count: _, range } => {
-					info.section(SectionId::DataCount.into(), range, input_wasm);
+					info.section(SectionId::DataCount.into(), range, input_wasm)?;
 				},
 				Payload::Version { .. } => {},
 				Payload::End(_) => break,
@@ -277,9 +279,14 @@ impl ModuleInfo {
 	}
 
 	/// Registers a new raw_section in the ModuleInfo
-	pub fn section(&mut self, id: u8, range: Range<usize>, full_wasm: &[u8]) {
-		self.raw_sections
-			.insert(id, RawSection::new(id, Some(range.start), full_wasm[range].to_vec()));
+	pub fn section(&mut self, id: u8, range: Range<usize>, full_wasm: &[u8]) -> Result<()> {
+		if range.start > full_wasm.len() || range.end > full_wasm.len() {
+			Err(ModuleInfoError::SectionRangeExceedsWasmLength { range, wasm_len: full_wasm.len() })
+		} else {
+			self.raw_sections
+				.insert(id, RawSection::new(id, Some(range.start), full_wasm[range].to_vec()));
+			Ok(())
+		}
 	}
 
 	/// Returns the function type based on the index of the type
