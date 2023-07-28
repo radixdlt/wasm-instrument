@@ -189,7 +189,7 @@ impl ModuleInfo {
 					}
 				},
 				Payload::TableSection(reader) => {
-					info.table_count += reader.count();
+					info.table_count = reader.count();
 					info.section(SectionId::Table.into(), reader.range(), input_wasm)?;
 
 					for table in reader.into_iter() {
@@ -280,12 +280,19 @@ impl ModuleInfo {
 
 	/// Registers a new raw_section in the ModuleInfo
 	pub fn section(&mut self, id: u8, range: Range<usize>, full_wasm: &[u8]) -> Result<()> {
-		if range.start > full_wasm.len() || range.end > full_wasm.len() {
-			Err(ModuleInfoError::SectionRangeExceedsWasmLength { range, wasm_len: full_wasm.len() })
+		if self.raw_sections.get(&id).is_none() {
+			if range.start > full_wasm.len() || range.end > full_wasm.len() {
+				Err(ModuleInfoError::SectionRangeExceedsWasmLength {
+					range,
+					wasm_len: full_wasm.len(),
+				})
+			} else {
+				self.raw_sections
+					.insert(id, RawSection::new(id, Some(range.start), full_wasm[range].to_vec()));
+				Ok(())
+			}
 		} else {
-			self.raw_sections
-				.insert(id, RawSection::new(id, Some(range.start), full_wasm[range].to_vec()));
-			Ok(())
+			Err(ModuleInfoError::SectionAlreadyExists(id))
 		}
 	}
 

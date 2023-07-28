@@ -7,6 +7,7 @@ use wasmparser::BinaryReaderError;
 #[derive(Clone, Debug)]
 pub enum ModuleInfoError {
 	WasmParserError(BinaryReaderError),
+	SectionAlreadyExists(u8),
 	SectionNotSupported(String),
 	TranslatorError(TranslatorError),
 	SectionRangeExceedsWasmLength { range: Range<usize>, wasm_len: usize },
