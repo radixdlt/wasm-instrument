@@ -673,6 +673,7 @@ pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Res
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::{gas_metering, gas_metering::ConstantCostRules, stack_limiter};
 	use wasm_encoder::ExportKind;
 	use wasmparser::{FuncType, ValType};
 
@@ -789,4 +790,80 @@ mod tests {
 
 		module.assert_stats();
 	}
+
+	#[test]
+	fn test_instrument_vs_stats() {
+		let bytes = include_bytes!("../../benches/fixtures/wasm/scrypto.wasm");
+		let mut module = ModuleInfo::new(bytes).unwrap();
+
+		module.assert_stats();
+
+		let backend = gas_metering::host_function::Injector::new("env", "gas");
+		let _injected_wasm =
+			gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+		module.assert_stats();
+
+		let _stack_limited_wasm = stack_limiter::inject(&mut module, 1024).unwrap();
+		module.assert_stats();
+
+		let mut module = ModuleInfo::new(bytes).unwrap();
+
+		module.assert_stats();
+
+		let backend = gas_metering::mutable_global::Injector::new("env", "gas_left");
+		let _injected_wasm =
+			gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+		module.assert_stats();
+
+		let _stack_limited_wasm = stack_limiter::inject(&mut module, 1024).unwrap();
+		module.assert_stats();
+	}
+
+	macro_rules! test_module_info_stats {
+	    ($name:expr) => {
+			paste! {
+				#[test]
+				fn [< test_module_info_stats_ $name:lower >]() {
+					let bytes = include_bytes!(concat!("../../benches/fixtures/wasm/", stringify!($name), ".wasm"));
+					let mut module = ModuleInfo::new(bytes).unwrap();
+
+					module.assert_stats();
+
+					let backend = gas_metering::host_function::Injector::new("env", "gas");
+					let _injected_wasm =
+						gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+					module.assert_stats();
+
+					let _stack_limited_wasm = stack_limiter::inject(&mut module, 1024).unwrap();
+					module.assert_stats();
+
+					let mut module = ModuleInfo::new(bytes).unwrap();
+
+					module.assert_stats();
+
+					let backend = gas_metering::mutable_global::Injector::new("env", "gas_left");
+					let _injected_wasm =
+						gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+					module.assert_stats();
+
+					let _stack_limited_wasm = stack_limiter::inject(&mut module, 1024).unwrap();
+					module.assert_stats();
+				}
+			}
+	    };
+	}
+	test_module_info_stats!(contract_terminate);
+	test_module_info_stats!(contract_transfer);
+	test_module_info_stats!(coremark_minimal);
+	test_module_info_stats!(dns);
+	test_module_info_stats!(erc1155);
+	test_module_info_stats!(erc20);
+	test_module_info_stats!(erc721);
+	test_module_info_stats!(many_blocks);
+	test_module_info_stats!(multisig);
+	test_module_info_stats!(proxy);
+	test_module_info_stats!(rand_extension);
+	test_module_info_stats!(scrypto);
+	test_module_info_stats!(trait_erc20);
+	test_module_info_stats!(wasm_kernel);
 }
