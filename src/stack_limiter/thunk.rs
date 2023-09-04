@@ -3,11 +3,11 @@ use crate::utils::{
 	module_info::ModuleInfo,
 	translator::{ConstExprKind, DefaultTranslator, Translator},
 };
-#[cfg(not(features = "std"))]
+#[cfg(not(feature = "std"))]
 use alloc::collections::BTreeMap as Map;
 use alloc::{vec, vec::Vec};
 use anyhow::{anyhow, Result};
-#[cfg(features = "std")]
+#[cfg(feature = "std")]
 use std::collections::HashMap as Map;
 use wasm_encoder::{
 	ElementMode, ElementSection, ElementSegment, Elements, ExportSection, SectionId,
