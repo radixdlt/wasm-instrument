@@ -8,7 +8,7 @@ use alloc::collections::BTreeMap as Map;
 use alloc::{vec, vec::Vec};
 use anyhow::{anyhow, Result};
 #[cfg(feature = "std")]
-use std::collections::HashMap as Map;
+use std::collections::BTreeMap as Map;
 use wasm_encoder::{
 	ElementMode, ElementSection, ElementSegment, Elements, ExportSection, SectionId,
 };
