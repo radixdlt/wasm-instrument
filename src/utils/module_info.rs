@@ -4,6 +4,7 @@ use crate::utils::{
 };
 use alloc::{
 	collections::{BTreeMap, BTreeSet},
+	format,
 	string::String,
 	vec,
 	vec::Vec,
@@ -133,7 +134,7 @@ impl ModuleInfo {
 			match payload {
 				Payload::CodeSectionStart { count, range, size: _ } => {
 					info.code_section_entry_count = count;
-					info.section(SectionId::Code.into(), range.clone(), input_wasm);
+					info.section(SectionId::Code.into(), range.clone(), input_wasm)?;
 					parser.skip_section();
 					// update slice, bypass the section
 					wasm = &input_wasm[range.end..];
@@ -141,7 +142,7 @@ impl ModuleInfo {
 					continue
 				},
 				Payload::TypeSection(reader) => {
-					info.section(SectionId::Type.into(), reader.range(), input_wasm);
+					info.section(SectionId::Type.into(), reader.range(), input_wasm)?;
 
 					// Save function types
 					for ty in reader.into_iter() {
@@ -149,7 +150,7 @@ impl ModuleInfo {
 					}
 				},
 				Payload::ImportSection(reader) => {
-					info.section(SectionId::Import.into(), reader.range(), input_wasm);
+					info.section(SectionId::Import.into(), reader.range(), input_wasm)?;
 
 					for import in reader.into_iter() {
 						let import = import?;
@@ -181,15 +182,15 @@ impl ModuleInfo {
 					}
 				},
 				Payload::FunctionSection(reader) => {
-					info.section(SectionId::Function.into(), reader.range(), input_wasm);
+					info.section(SectionId::Function.into(), reader.range(), input_wasm)?;
 
 					for func_idx in reader.into_iter() {
 						info.function_map.push(func_idx?);
 					}
 				},
 				Payload::TableSection(reader) => {
-					info.table_count += reader.count();
-					info.section(SectionId::Table.into(), reader.range(), input_wasm);
+					info.table_count = reader.count();
+					info.section(SectionId::Table.into(), reader.range(), input_wasm)?;
 
 					for table in reader.into_iter() {
 						let table = table?;
@@ -197,15 +198,15 @@ impl ModuleInfo {
 					}
 				},
 				Payload::MemorySection(reader) => {
-					info.memory_count += reader.count();
-					info.section(SectionId::Memory.into(), reader.range(), input_wasm);
+					info.memory_count = reader.count();
+					info.section(SectionId::Memory.into(), reader.range(), input_wasm)?;
 
 					for ty in reader.into_iter() {
 						info.memory_types.push(ty?);
 					}
 				},
 				Payload::GlobalSection(reader) => {
-					info.section(SectionId::Global.into(), reader.range(), input_wasm);
+					info.section(SectionId::Global.into(), reader.range(), input_wasm)?;
 
 					for global in reader.into_iter() {
 						let global = global?;
@@ -213,50 +214,78 @@ impl ModuleInfo {
 					}
 				},
 				Payload::ExportSection(reader) => {
-					info.exports_count = reader.count();
-
 					for export in reader.clone().into_iter() {
 						let export = export?;
-						if let ExternalKind::Global = export.kind {
-							info.exports_global_count += 1;
+						if !info.export_names.contains(export.name) {
+							if let ExternalKind::Global = export.kind {
+								info.exports_global_count += 1;
+							}
+							info.export_names.insert(export.name.into());
+							info.exports_count += 1;
+						} else {
+							return Err(ModuleInfoError::ExportAlreadyExists(export.name.into()))
 						}
-						info.export_names.insert(export.name.into());
 					}
-
-					info.section(SectionId::Export.into(), reader.range(), input_wasm);
+					info.section(SectionId::Export.into(), reader.range(), input_wasm)?;
 				},
 				Payload::StartSection { func, range } => {
 					info.start_function = Some(func);
-					info.section(SectionId::Start.into(), range, input_wasm);
+					info.section(SectionId::Start.into(), range, input_wasm)?;
 				},
 				Payload::ElementSection(reader) => {
 					info.elements_count = reader.count();
-					info.section(SectionId::Element.into(), reader.range(), input_wasm);
+					info.section(SectionId::Element.into(), reader.range(), input_wasm)?;
 				},
 				Payload::DataSection(reader) => {
 					info.data_segments_count = reader.count();
-					info.section(SectionId::Data.into(), reader.range(), input_wasm);
+					info.section(SectionId::Data.into(), reader.range(), input_wasm)?;
 				},
 				#[allow(unused_variables)]
 				Payload::CustomSection(c) => {
 					#[cfg(not(feature = "ignore_custom_section"))]
 					// At the moment only name section supported
 					if c.name() == "name" {
-						info.section(SectionId::Custom.into(), c.range(), input_wasm);
+						info.section(SectionId::Custom.into(), c.range(), input_wasm)?;
 					}
 				},
 
 				Payload::DataCountSection { count: _, range } => {
-					info.section(SectionId::DataCount.into(), range, input_wasm);
+					info.section(SectionId::DataCount.into(), range, input_wasm)?;
 				},
 				Payload::Version { .. } => {},
 				Payload::End(_) => break,
-				_ => todo!("{:?} not implemented", payload),
+				p => return Err(ModuleInfoError::SectionNotSupported(format!("{:?}", p))),
 			}
 			wasm = &wasm[consumed..];
 		}
 
 		Ok(info)
+	}
+
+	#[cfg(test)]
+	pub fn assert_stats(&self) {
+		// Global section
+		assert_eq!(
+			self.global_section().unwrap().unwrap_or(vec![]).len(),
+			self.num_local_globals() as usize
+		);
+		// Imported globals
+		assert_eq!(
+			self.global_types.len() - self.num_local_globals() as usize,
+			self.num_imported_globals() as usize
+		);
+
+		// Export section
+		assert_eq!(self.export_names.len(), self.exports_count as usize);
+		assert_eq!(
+			self.export_section().unwrap().unwrap_or(vec![]).len(),
+			self.exports_count as usize
+		);
+		// Element section
+		assert_eq!(
+			self.element_section().unwrap().unwrap_or(vec![]).len(),
+			self.elements_count as usize,
+		);
 	}
 
 	/// Validates the WASM binary
@@ -276,9 +305,21 @@ impl ModuleInfo {
 	}
 
 	/// Registers a new raw_section in the ModuleInfo
-	pub fn section(&mut self, id: u8, range: Range<usize>, full_wasm: &[u8]) {
-		self.raw_sections
-			.insert(id, RawSection::new(id, Some(range.start), full_wasm[range].to_vec()));
+	pub fn section(&mut self, id: u8, range: Range<usize>, full_wasm: &[u8]) -> Result<()> {
+		if self.raw_sections.get(&id).is_none() {
+			if range.start > full_wasm.len() || range.end > full_wasm.len() {
+				Err(ModuleInfoError::SectionRangeExceedsWasmLength {
+					range,
+					wasm_len: full_wasm.len(),
+				})
+			} else {
+				self.raw_sections
+					.insert(id, RawSection::new(id, Some(range.start), full_wasm[range].to_vec()));
+				Ok(())
+			}
+		} else {
+			Err(ModuleInfoError::SectionAlreadyExists(id))
+		}
 	}
 
 	/// Returns the function type based on the index of the type
@@ -326,13 +367,6 @@ impl ModuleInfo {
 		DefaultTranslator.translate_type_def(func_type.clone(), &mut type_builder)?;
 		self.replace_section(SectionId::Type.into(), &type_builder)?;
 		Ok(func_type_index)
-	}
-
-	/// Returns the number of globals used by the Wasm binary including imported
-	/// globals
-	#[allow(dead_code)]
-	pub fn get_global_count(&self) -> usize {
-		self.global_types.len()
 	}
 
 	/// Replace the `i`th section in this module with the given new section.
@@ -470,6 +504,7 @@ impl ModuleInfo {
 			global_name,
 			DefaultTranslator.translate_global_type(&global_type)?,
 		);
+		self.global_types.push(global_type);
 		self.imported_globals_count += 1;
 		self.replace_section(SectionId::Import.into(), &import_decoder)
 	}
@@ -559,6 +594,7 @@ impl ModuleInfo {
 		self.imported_memories_count
 	}
 
+	/// Returns the number of globals: local and imported
 	#[allow(dead_code)]
 	pub fn num_globals(&self) -> u32 {
 		self.global_types.len() as u32
@@ -637,6 +673,9 @@ pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Res
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::{gas_metering, gas_metering::ConstantCostRules, stack_limiter};
+	use wasm_encoder::ExportKind;
+	use wasmparser::{FuncType, ValType};
 
 	fn wasm_to_wat(bytes: &[u8]) -> String {
 		String::from_utf8(
@@ -705,4 +744,126 @@ mod tests {
 
 		assert_eq!(expected_wat, wat)
 	}
+
+	#[test]
+	fn test_module_info_stats() {
+		let bytes = wat_to_wasm(WAT);
+		let mut module = ModuleInfo::new(&bytes).unwrap();
+
+		module.assert_stats();
+
+		module
+			.add_global(
+				GlobalType { content_type: ValType::I64, mutable: true },
+				&wasm_encoder::ConstExpr::i64_const(0),
+			)
+			.unwrap();
+
+		module
+			.add_import_global(
+				"env",
+				"some_global",
+				GlobalType { content_type: ValType::I64, mutable: true },
+			)
+			.unwrap();
+
+		let func_type = Type::Func(FuncType::new(vec![ValType::I64], vec![]));
+		module.add_func_type(&func_type).unwrap();
+
+		// Add import of function of type that already exists
+		module.add_import_func("env", "some_func", func_type).unwrap();
+
+		let func_type =
+			Type::Func(FuncType::new(vec![ValType::I64, ValType::I64], vec![ValType::I32]));
+
+		// Add import with function type that does not exist yet
+		module.add_import_func("env", "some_func_2", func_type).unwrap();
+
+		module
+			.add_exports(&[
+				("export_global".to_string(), ExportKind::Global, 0),
+				("export_func".to_string(), ExportKind::Func, 0),
+				("export_memory".to_string(), ExportKind::Memory, 0),
+				("export_table".to_string(), ExportKind::Table, 0),
+			])
+			.unwrap();
+
+		module.assert_stats();
+	}
+
+	#[test]
+	fn test_instrument_vs_stats() {
+		let bytes = include_bytes!("../../benches/fixtures/wasm/scrypto.wasm");
+		let mut module = ModuleInfo::new(bytes).unwrap();
+
+		module.assert_stats();
+
+		let backend = gas_metering::host_function::Injector::new("env", "gas");
+		let _injected_wasm =
+			gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+		module.assert_stats();
+
+		let _stack_limited_wasm = stack_limiter::inject(&mut module, 1024).unwrap();
+		module.assert_stats();
+
+		let mut module = ModuleInfo::new(bytes).unwrap();
+
+		module.assert_stats();
+
+		let backend = gas_metering::mutable_global::Injector::new("env", "gas_left");
+		let _injected_wasm =
+			gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+		module.assert_stats();
+
+		let _stack_limited_wasm = stack_limiter::inject(&mut module, 1024).unwrap();
+		module.assert_stats();
+	}
+
+	macro_rules! test_module_info_stats {
+	    ($name:expr) => {
+			paste! {
+				#[test]
+				fn [< test_module_info_stats_ $name:lower >]() {
+					let bytes = include_bytes!(concat!("../../benches/fixtures/wasm/", stringify!($name), ".wasm"));
+					let mut module = ModuleInfo::new(bytes).unwrap();
+
+					module.assert_stats();
+
+					let backend = gas_metering::host_function::Injector::new("env", "gas");
+					let _injected_wasm =
+						gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+					module.assert_stats();
+
+					let _stack_limited_wasm = stack_limiter::inject(&mut module, 1024).unwrap();
+					module.assert_stats();
+
+					let mut module = ModuleInfo::new(bytes).unwrap();
+
+					module.assert_stats();
+
+					let backend = gas_metering::mutable_global::Injector::new("env", "gas_left");
+					let _injected_wasm =
+						gas_metering::inject(&mut module, backend, &ConstantCostRules::default()).unwrap();
+					module.assert_stats();
+
+					let _stack_limited_wasm = stack_limiter::inject(&mut module, 1024).unwrap();
+					module.assert_stats();
+				}
+			}
+	    };
+	}
+	test_module_info_stats!(contract_terminate);
+	test_module_info_stats!(contract_transfer);
+	test_module_info_stats!(coremark_minimal);
+	test_module_info_stats!(dns);
+	test_module_info_stats!(erc1155);
+	test_module_info_stats!(erc20);
+	test_module_info_stats!(erc721);
+	test_module_info_stats!(many_blocks);
+	test_module_info_stats!(multisig);
+	test_module_info_stats!(proxy);
+	test_module_info_stats!(rand_extension);
+	test_module_info_stats!(scrypto);
+	test_module_info_stats!(trait_erc20);
+	test_module_info_stats!(wasm_kernel);
 }
