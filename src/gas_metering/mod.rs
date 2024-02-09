@@ -244,7 +244,6 @@ pub fn inject<R: Rules, B: Backend>(
 			.enumerate()
 			.map(|(index, item)| (item, index as u32 == module_info.code_section_entry_count - 1))
 		{
-			let func_body = func_body;
 			let current_locals = copy_locals(&func_body)?;
 
 			let locals_count = current_locals.iter().map(|(count, _)| count).sum();
@@ -275,7 +274,7 @@ pub fn inject<R: Rules, B: Backend>(
 				// before each invocation (see `inject_counter()`).
 				if is_last {
 					code_section_builder.function(&func_builder);
-					continue
+					continue;
 				}
 			}
 
@@ -289,7 +288,7 @@ pub fn inject<R: Rules, B: Backend>(
 				Ok(new_builder) => func_builder = new_builder,
 				Err(_) => {
 					error = true;
-					break
+					break;
 				},
 			}
 			if rules.memory_grow_cost().enabled() {
@@ -367,9 +366,9 @@ pub fn inject<R: Rules, B: Backend>(
 
 				ele_sec_builder.segment(ElementSegment {
 					mode,
-					/// The element type.
+					// The element type.
 					element_type,
-					/// The element functions.
+					// The element functions.
 					elements,
 				});
 			}
@@ -392,7 +391,7 @@ pub fn inject<R: Rules, B: Backend>(
 	update_custom_section_function_indices(module_info, gas_func_idx)?;
 
 	if error {
-		return Err(anyhow!("inject fail"))
+		return Err(anyhow!("inject fail"));
 	}
 
 	if need_grow_counter {
@@ -492,7 +491,7 @@ impl Counter {
 		let closing_control_index = self.stack.len();
 
 		if self.stack.is_empty() {
-			return Ok(())
+			return Ok(());
 		}
 
 		// Update the lowest_forward_br_target for the control block now on top of the stack.
@@ -543,7 +542,7 @@ impl Counter {
 					.cost
 					.checked_add(closing_metered_block.cost)
 					.ok_or_else(|| anyhow!("overflow occured"))?;
-				return Ok(())
+				return Ok(());
 			}
 		}
 
@@ -568,7 +567,7 @@ impl Counter {
 				target_block.is_loop
 			};
 			if target_is_loop {
-				continue
+				continue;
 			}
 
 			let control_block =
@@ -793,7 +792,7 @@ fn insert_metering_calls(
 	}
 
 	if block_iter.next().is_some() {
-		return Err(anyhow!("block should be consume all"))
+		return Err(anyhow!("block should be consume all"));
 	}
 	Ok(new_func)
 }
