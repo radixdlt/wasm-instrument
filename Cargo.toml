@@ -38,7 +38,7 @@ criterion = "0.4"
 diff = "0.1"
 pretty_assertions = "1"
 rand = "0.8"
-wat = "1"
+wat = "1.0.66"
 wasmi = "0.29"
 wabt = { version = "0.10.0" }
 

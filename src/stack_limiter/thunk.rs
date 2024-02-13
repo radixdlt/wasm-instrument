@@ -175,9 +175,9 @@ pub fn generate_thunks(ctx: &mut Context, module_info: &mut ModuleInfo) -> Resul
 
 		ele_sec_builder.segment(ElementSegment {
 			mode,
-			/// The element type.
+			// The element type.
 			element_type,
-			/// The element functions.
+			// The element functions.
 			elements,
 		});
 	}

@@ -139,7 +139,7 @@ impl ModuleInfo {
 					// update slice, bypass the section
 					wasm = &input_wasm[range.end..];
 
-					continue
+					continue;
 				},
 				Payload::TypeSection(reader) => {
 					info.section(SectionId::Type.into(), reader.range(), input_wasm)?;
@@ -223,7 +223,7 @@ impl ModuleInfo {
 							info.export_names.insert(export.name.into());
 							info.exports_count += 1;
 						} else {
-							return Err(ModuleInfoError::ExportAlreadyExists(export.name.into()))
+							return Err(ModuleInfoError::ExportAlreadyExists(export.name.into()));
 						}
 					}
 					info.section(SectionId::Export.into(), reader.range(), input_wasm)?;
@@ -266,7 +266,7 @@ impl ModuleInfo {
 	pub fn assert_stats(&self) {
 		// Global section
 		assert_eq!(
-			self.global_section().unwrap().unwrap_or(vec![]).len(),
+			self.global_section().unwrap().unwrap_or_default().len(),
 			self.num_local_globals() as usize
 		);
 		// Imported globals
@@ -278,12 +278,12 @@ impl ModuleInfo {
 		// Export section
 		assert_eq!(self.export_names.len(), self.exports_count as usize);
 		assert_eq!(
-			self.export_section().unwrap().unwrap_or(vec![]).len(),
+			self.export_section().unwrap().unwrap_or_default().len(),
 			self.exports_count as usize
 		);
 		// Element section
 		assert_eq!(
-			self.element_section().unwrap().unwrap_or(vec![]).len(),
+			self.element_section().unwrap().unwrap_or_default().len(),
 			self.elements_count as usize,
 		);
 	}
@@ -294,7 +294,7 @@ impl ModuleInfo {
 			return Err(ModuleInfoError::CodeAndFuncSectionCntMismatch(
 				self.code_section_entry_count,
 				self.num_local_functions(),
-			))
+			));
 		}
 
 		// TODO validate_all() creates internal parser and parses the binary again. Rework to
@@ -326,7 +326,7 @@ impl ModuleInfo {
 	/// `types[idx]`
 	pub fn get_type_by_idx(&self, type_idx: u32) -> Result<&Type> {
 		if type_idx >= self.types_map.len() as u32 {
-			return Err(ModuleInfoError::TypeDoesNotExist(type_idx))
+			return Err(ModuleInfoError::TypeDoesNotExist(type_idx));
 		}
 		Ok(&self.types_map[type_idx as usize])
 	}
@@ -335,7 +335,7 @@ impl ModuleInfo {
 	/// `types[functions[idx]]`
 	pub fn get_type_by_func_idx(&self, func_idx: u32) -> Result<&Type> {
 		if func_idx >= self.function_map.len() as u32 {
-			return Err(ModuleInfoError::FunctionDoesNotExist(func_idx))
+			return Err(ModuleInfoError::FunctionDoesNotExist(func_idx));
 		}
 		let type_idx = self.function_map[func_idx as usize];
 		self.get_type_by_idx(type_idx)
@@ -347,7 +347,7 @@ impl ModuleInfo {
 		for (index, ty) in self.types_map.iter().enumerate() {
 			let Type::Func(ot) = ty else { todo!("Array type not supported yet") };
 			if ot.eq(dt) {
-				return Some(index as u32)
+				return Some(index as u32);
 			}
 		}
 		None
@@ -402,7 +402,7 @@ impl ModuleInfo {
 				self.export_names.insert(String::from(name));
 				self.exports_count += 1;
 			} else {
-				return Err(ModuleInfoError::ExportAlreadyExists(String::from(name)))
+				return Err(ModuleInfoError::ExportAlreadyExists(String::from(name)));
 			}
 		}
 		self.replace_section(SectionId::Export.into(), &section_builder)
