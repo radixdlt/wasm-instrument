@@ -106,7 +106,7 @@ impl Stack {
 	/// values popped.
 	fn pop_values(&mut self, value_count: u32) -> Result<()> {
 		if value_count == 0 {
-			return Ok(())
+			return Ok(());
 		}
 		{
 			let top_frame = self.frame(0)?;
@@ -117,8 +117,8 @@ impl Stack {
 				return if top_frame.is_polymorphic {
 					Ok(())
 				} else {
-					return Err(anyhow!("trying to pop more values than pushed"))
-				}
+					return Err(anyhow!("trying to pop more values than pushed"));
+				};
 			}
 		}
 
@@ -241,7 +241,7 @@ pub fn compute(func_idx: u32, module: &ModuleInfo) -> Result<u32> {
 				for target in targets.targets() {
 					let arity = stack.frame(target?)?.branch_arity;
 					if arity != arity_of_default {
-						return Err(anyhow!("arity of all jump-targets must be equal"))
+						return Err(anyhow!("arity of all jump-targets must be equal"));
 					}
 				}
 

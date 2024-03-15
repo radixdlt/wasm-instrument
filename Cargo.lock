@@ -459,6 +459,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "radix-wasm-instrument"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "binaryen",
+ "criterion",
+ "diff",
+ "paste",
+ "pretty_assertions",
+ "rand",
+ "wabt",
+ "wasm-encoder",
+ "wasmi",
+ "wasmparser",
+ "wasmprinter",
+ "wat",
+]
+
+[[package]]
 name = "rand"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -746,25 +765,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18c41dbd92eaebf3612a39be316540b8377c871cb9bde6b064af962984912881"
 dependencies = [
  "leb128",
-]
-
-[[package]]
-name = "wasm-instrument"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "binaryen",
- "criterion",
- "diff",
- "paste",
- "pretty_assertions",
- "rand",
- "wabt",
- "wasm-encoder",
- "wasmi",
- "wasmparser",
- "wasmprinter",
- "wat",
 ]
 
 [[package]]
