@@ -47,7 +47,7 @@ pub fn update_custom_section_function_indices(
 
 		let data_len = custom_section.data.len();
 		if data_len == 0 {
-			return Err(anyhow!("Custom section data length is 0"))
+			return Err(anyhow!("Custom section data length is 0"));
 		}
 		let data_offset = 1 + custom_section.data[0] as usize;
 
@@ -56,10 +56,10 @@ pub fn update_custom_section_function_indices(
 				"Invalid data offset {:?}, greater than data length {:?}",
 				data_offset,
 				data_len
-			))
+			));
 		}
 		if &custom_section.data[1..data_offset] != "name".as_bytes() {
-			return Err(anyhow!("Not supported custom section"))
+			return Err(anyhow!("Not supported custom section"));
 		}
 
 		// That should only happen only if section was added manually, which is not supported at the

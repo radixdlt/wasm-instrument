@@ -1,4 +1,9 @@
-# wasm-instrument
+# radix-wasm-instrument
+
+`radix-wasm-instrument` is a fork of the [paritytech/wasm-instrument](https://github.com/paritytech/wasm-instrument), with the following changes:
+- Replaced dependency `parity-wasm` with `wasmparser`.
+
+---
 
 A Rust library containing a collection of wasm module instrumentations and transformations
 mainly useful for wasm based block chains and smart contracts.

@@ -1,3 +1,5 @@
+extern crate radix_wasm_instrument as wasm_instrument;
+
 use std::{
 	fs,
 	io::{self, Read, Write},

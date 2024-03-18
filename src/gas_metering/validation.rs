@@ -312,7 +312,7 @@ fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> Result<bool> {
 		}
 
 		if node.forward_edges.is_empty() && total_actual != total_charged {
-			return Ok(false)
+			return Ok(false);
 		}
 
 		for loop_node_id in node.loopback_edges.iter() {
@@ -320,13 +320,13 @@ fn validate_graph_gas_costs(graph: &ControlFlowGraph) -> Result<bool> {
 				.get_mut(loop_node_id)
 				.expect("cannot arrive at loopback edge without visiting loop entry node");
 			if loop_actual != loop_charged {
-				return Ok(false)
+				return Ok(false);
 			}
 		}
 
 		for next_node_id in node.forward_edges.iter() {
 			if !visit(graph, *next_node_id, total_actual, total_charged, loop_costs)? {
-				return Ok(false)
+				return Ok(false);
 			}
 		}
 

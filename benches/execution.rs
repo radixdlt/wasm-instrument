@@ -1,3 +1,5 @@
+extern crate radix_wasm_instrument as wasm_instrument;
+
 use criterion::{
 	criterion_group, criterion_main, measurement::Measurement, Bencher, BenchmarkGroup, Criterion,
 };
