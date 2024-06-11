@@ -421,11 +421,9 @@ impl ModuleInfo {
 			let export_kind = DefaultTranslator.translate_export_kind(export.kind)?;
 			// println!("remove_export export = {:?} export_kind = {:?}", export, export_kind);
 			if !export.name.ends_with(name) {
-				// println!("remove_export remove");
-				// } else {
 				section_builder.export(export.name, export_kind, export.index);
 				exports_count += 1;
-				export_names.insert(export.name.to_owned());
+				export_names.insert(export.name.to_string());
 				if let ExportKind::Global = export_kind {
 					exports_global_count += 1;
 				}
