@@ -408,6 +408,36 @@ impl ModuleInfo {
 		self.replace_section(SectionId::Export.into(), &section_builder)
 	}
 
+	pub fn remove_export(&mut self, name: &str) -> Result<()> {
+		let mut section_builder = wasm_encoder::ExportSection::new();
+		let export_section = self.export_section()?.unwrap_or(vec![]);
+
+		// let mut idx = 0;
+		let mut export_names: BTreeSet<String> = BTreeSet::new();
+		let mut exports_count: u32 = 0;
+		let mut exports_global_count: u32 = 0;
+
+		for export in export_section {
+			let export_kind = DefaultTranslator.translate_export_kind(export.kind)?;
+			// println!("remove_export export = {:?} export_kind = {:?}", export, export_kind);
+			if !export.name.ends_with(name) {
+				// println!("remove_export remove");
+				// } else {
+				section_builder.export(export.name, export_kind, export.index);
+				exports_count += 1;
+				export_names.insert(export.name.to_owned());
+				if let ExportKind::Global = export_kind {
+					exports_global_count += 1;
+				}
+			}
+		}
+		self.export_names = export_names;
+		self.exports_count = exports_count;
+		self.exports_global_count = exports_global_count;
+
+		self.replace_section(SectionId::Export.into(), &section_builder)
+	}
+
 	pub fn add_global(
 		&mut self,
 		global_type: GlobalType,
@@ -866,4 +896,14 @@ mod tests {
 	test_module_info_stats!(scrypto);
 	test_module_info_stats!(trait_erc20);
 	test_module_info_stats!(wasm_kernel);
+
+	// #[test]
+	// fn test_remove_export() {
+	// 	let bytes = include_bytes!("../../_ex/everything_schema.wasm");
+	// 	let mut module = ModuleInfo::new(bytes).unwrap();
+
+	// 	module.remove_export("_schema").unwrap();
+
+	// 	std::fs::write("/tmp/everything_schema_remove_schema.wasm", module.bytes()).unwrap();
+	// }
 }
