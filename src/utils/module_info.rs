@@ -423,7 +423,7 @@ impl ModuleInfo {
 			if !export.name.ends_with(name) {
 				section_builder.export(export.name, export_kind, export.index);
 				exports_count += 1;
-				export_names.insert(export.name.to_string());
+				export_names.insert(String::from(export.name));
 				if let ExportKind::Global = export_kind {
 					exports_global_count += 1;
 				}
@@ -702,6 +702,7 @@ pub fn truncate_len_from_encoder(func_builder: &dyn wasm_encoder::Encode) -> Res
 mod tests {
 	use super::*;
 	use crate::{gas_metering, gas_metering::ConstantCostRules, stack_limiter};
+	use alloc::string::ToString;
 	use wasm_encoder::ExportKind;
 	use wasmparser::{FuncType, ValType};
 
